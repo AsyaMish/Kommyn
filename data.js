@@ -1,7 +1,7 @@
 /* ============================================
    Коммуналка — «Кладовая» (data.js)
-   Хранит все данные приложения на устройстве,
-   в памяти браузера. Без интернета и серверов.
+   Хранит все данные приложения на устройстве
+   и отвечает за записи учёта.
    ============================================ */
 'use strict';
 
@@ -17,12 +17,12 @@ const Data = (() => {
     return {
       schema: 1,
       records: [],               // все записи учёта
-      tariffs: {},               // действующие тарифы по услугам (этап 2)
+      tariffs: {},               // действующие тарифы по услугам
       residents: {               // количество жильцов по адресам
         'Рабочая 23': 1,
         'Рабочая 23А': 4
       },
-      prefs: {                   // настройки интерфейса
+      prefs: {
         launches: 0              // счётчик запусков (проверка хранилища)
       }
     };
@@ -66,8 +66,36 @@ const Data = (() => {
 
   function isHealthy() { return healthy; }
 
+  // ---------- Записи ----------
+
+  // Найти запись по уникальному ключу: услуга + адрес + подпункт + период
+  function findRecord(service, address, subservice, year, month) {
+    return state.records.find(r =>
+      r.service === service &&
+      (r.address || null) === (address || null) &&
+      (r.subservice || null) === (subservice || null) &&
+      r.period_year === year &&
+      (r.period_month || null) === (month || null)) || null;
+  }
+
+  // Добавить или обновить запись
+  function upsertRecord(record) {
+    const i = state.records.findIndex(r => r.id === record.id);
+    if (i >= 0) state.records[i] = record;
+    else state.records.push(record);
+    persist();
+    return record;
+  }
+
+  // Удалить запись
+  function removeRecord(id) {
+    state.records = state.records.filter(r => r.id !== id);
+    persist();
+  }
+
   return {
     init, persist, uid, isHealthy,
+    findRecord, upsertRecord, removeRecord,
     get state() { return state; }
   };
 })();
