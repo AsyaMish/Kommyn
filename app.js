@@ -1,13 +1,11 @@
 /* ============================================
    Коммуналка — «Пульт» (app.js)
-   Запускает приложение и переключает разделы.
+   Запуск, навигация, выбранный месяц.
    ============================================ */
 'use strict';
 
 const App = (() => {
 
-  const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-                  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
   const PAGES = ['dashboard', 'history', 'reports', 'archive', 'settings'];
   const TITLES = {
     dashboard: 'Содержание',
@@ -28,7 +26,7 @@ const App = (() => {
 
   function renderPeriod() {
     const label = document.getElementById('period-label');
-    if (label) label.textContent = MONTHS[period.month - 1] + ' ' + period.year;
+    if (label) label.textContent = Logic.MONTHS[period.month - 1] + ' ' + period.year;
   }
 
   function shiftMonth(delta) {
@@ -38,6 +36,7 @@ const App = (() => {
     if (m > 12) { m = 1; y++; }
     period = { year: y, month: m };
     renderPeriod();
+    UI.renderDashboard();   // карточки зависят от выбранного месяца
   }
 
   // ----- Переключение разделов -----
@@ -56,6 +55,7 @@ const App = (() => {
     });
     const title = document.getElementById('page-title');
     if (title) title.textContent = TITLES[id] || '';
+    if (id === 'dashboard') UI.renderDashboard();
     if (id === 'settings') UI.renderSettingsInfo();
     window.scrollTo(0, 0);
   }
