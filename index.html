@@ -1,1 +1,151 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#e07a3f">
+  <title>Коммуналка</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
 
+  <!-- ===== Боковая панель — видна только на компьютере ===== -->
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-icon">🏠</span>Коммуналка</div>
+    <nav class="side-nav">
+      <button class="nav-item active" data-page="dashboard"><span class="nav-icon">🏠</span>Содержание</button>
+      <button class="nav-item" data-page="history"><span class="nav-icon">🕘</span>История</button>
+      <button class="nav-item" data-page="reports"><span class="nav-icon">📊</span>Отчёты</button>
+      <button class="nav-item" data-page="archive"><span class="nav-icon">🗄️</span>Архив</button>
+      <button class="nav-item" data-page="settings"><span class="nav-icon">⚙️</span>Настройки</button>
+    </nav>
+    <div class="sidebar-note">Данные хранятся<br>только на этом устройстве</div>
+  </aside>
+
+  <!-- ===== Основная часть ===== -->
+  <div class="main">
+
+    <header class="topbar">
+      <h1 class="page-title" id="page-title">Содержание</h1>
+    </header>
+
+    <main class="content">
+
+      <!-- ===== РАЗДЕЛ «СОДЕРЖАНИЕ» ===== -->
+      <section class="page active" id="page-dashboard">
+
+        <!-- Переключатель месяца и года -->
+        <div class="period-bar">
+          <button class="period-btn" id="period-prev" aria-label="Предыдущий месяц">‹</button>
+          <div class="period-label" id="period-label">…</div>
+          <button class="period-btn" id="period-next" aria-label="Следующий месяц">›</button>
+        </div>
+
+        <!-- Список услуг (пока заглушки, оживут на этапах 2–3) -->
+        <div class="service-list">
+
+          <details class="service">
+            <summary><span class="service-name"><span class="service-icon">🔥</span>Газ</span><span class="service-hint">помесячно · показания · 23, 23А</span></summary>
+            <div class="service-body">
+              <div class="addr-chips"><span class="addr-chip">23</span><span class="addr-chip">23А</span></div>
+              <div class="placeholder-box small">Карточки появятся на этапе 2</div>
+            </div>
+          </details>
+
+          <details class="service">
+            <summary><span class="service-name"><span class="service-icon">💧</span>Вода</span><span class="service-hint">помесячно · показания · 23, 23А</span></summary>
+            <div class="service-body">
+              <div class="addr-chips"><span class="addr-chip">23</span><span class="addr-chip">23А</span></div>
+              <div class="placeholder-box small">Карточки появятся на этапе 2</div>
+            </div>
+          </details>
+
+          <details class="service">
+            <summary><span class="service-name"><span class="service-icon">⚡</span>Свет</span><span class="service-hint">помесячно · показания · 23, 23А</span></summary>
+            <div class="service-body">
+              <div class="addr-chips"><span class="addr-chip">23</span><span class="addr-chip">23А</span></div>
+              <div class="placeholder-box small">Карточки появятся на этапе 2</div>
+            </div>
+          </details>
+
+          <details class="service">
+            <summary><span class="service-name"><span class="service-icon">🗑️</span>Мусор</span><span class="service-hint">помесячно · жильцы × тариф · 23, 23А</span></summary>
+            <div class="service-body">
+              <div class="addr-chips"><span class="addr-chip">23</span><span class="addr-chip">23А</span></div>
+              <div class="placeholder-box small">Карточки появятся на этапе 2</div>
+            </div>
+          </details>
+
+          <details class="service">
+            <summary><span class="service-name"><span class="service-icon">🌐</span>Интернет</span><span class="service-hint">помесячно · без адресов</span></summary>
+            <div class="service-body">
+              <div class="addr-chips"><span class="addr-chip">Мобильный</span><span class="addr-chip">Домашний</span></div>
+              <div class="placeholder-box small">Карточки появятся на этапе 2</div>
+            </div>
+          </details>
+
+          <details class="service">
+            <summary><span class="service-name"><span class="service-icon">📺</span>Телевидение</span><span class="service-hint">раз в год</span></summary>
+            <div class="service-body">
+              <div class="placeholder-box small">Карточка появится на этапе 3</div>
+            </div>
+          </details>
+
+          <details class="service">
+            <summary><span class="service-name"><span class="service-icon">🧾</span>Налоги</span><span class="service-hint">раз в год · только 23А</span></summary>
+            <div class="service-body">
+              <div class="addr-chips"><span class="addr-chip">23А</span></div>
+              <div class="placeholder-box small">Карточка появится на этапе 3</div>
+            </div>
+          </details>
+
+        </div>
+      </section>
+
+      <!-- ===== РАЗДЕЛ «ИСТОРИЯ» ===== -->
+      <section class="page" id="page-history">
+        <div class="placeholder-box">Раздел «История» появится на этапе 4</div>
+      </section>
+
+      <!-- ===== РАЗДЕЛ «ОТЧЁТЫ» ===== -->
+      <section class="page" id="page-reports">
+        <div class="placeholder-box">Раздел «Отчёты» появится на этапе 5</div>
+      </section>
+
+      <!-- ===== РАЗДЕЛ «АРХИВ» ===== -->
+      <section class="page" id="page-archive">
+        <div class="placeholder-box">Раздел «Архив» появится на этапе 6</div>
+      </section>
+
+      <!-- ===== РАЗДЕЛ «НАСТРОЙКИ» ===== -->
+      <section class="page" id="page-settings">
+        <div id="settings-info"></div>
+      </section>
+
+    </main>
+
+    <!-- ===== Нижняя навигация — видна только на телефоне ===== -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-page="dashboard"><span class="nav-icon">🏠</span><span>Содержание</span></button>
+      <button class="nav-item" data-page="history"><span class="nav-icon">🕘</span><span>История</span></button>
+      <button class="nav-item" data-page="reports"><span class="nav-icon">📊</span><span>Отчёты</span></button>
+      <button class="nav-item" data-page="archive"><span class="nav-icon">🗄️</span><span>Архив</span></button>
+      <button class="nav-item" data-page="settings"><span class="nav-icon">⚙️</span><span>Настройки</span></button>
+    </nav>
+
+  </div>
+</div>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+
+<noscript><div class="noscript">Для работы приложения включите JavaScript в браузере.</div></noscript>
+
+<script src="data.js" defer></script>
+<script src="logic.js" defer></script>
+<script src="ui.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>
