@@ -685,3 +685,44 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .arch-row-main { flex: 1; min-width: 0; }
 .arch-row-title { font-size: 14px; font-weight: 600; }
 .arch-row-sub { font-size: 12px; color: var(--muted); }
+
+/* ============================================================
+   Раздел «Настройки» (этап 7)
+   ============================================================ */
+
+.sett-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.sett-name { font-weight: 600; font-size: 15px; }
+.sett-val { font-weight: 700; color: var(--accent-dark); }
+.sett-val.none { color: var(--muted); font-weight: 600; }
+.sett-label { font-weight: 600; font-size: 14px; margin-top: 16px; }
+
+.tar-details { margin: 2px 0 8px; }
+.tar-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 0;
+  user-select: none;
+}
+.tar-details summary:hover { color: var(--accent-dark); }
+.tar-details[open] summary { color: var(--accent-dark); }
+.tar-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 2px 6px 14px;
+  font-size: 14px;
+  border-bottom: 1px dashed var(--line);
+}
+.tar-row:last-child { border-bottom: none; }
+.tar-period { color: var(--muted); }
+.tar-val { font-weight: 600; }

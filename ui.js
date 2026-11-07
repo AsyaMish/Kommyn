@@ -1671,30 +1671,312 @@ const UI = (() => {
     });
   }
 
-  // ---------- Страница «Настройки» (информация) ----------
+  // ---------- Страница «Настройки» (этап 7) ----------
+
+  // Услуги, у которых есть тариф (для истории тарифов)
+  const TARIFF_SERVICES = [
+    { key: 'Газ',   icon: '🔥' },
+    { key: 'Вода',  icon: '💧' },
+    { key: 'Свет',  icon: '⚡' },
+    { key: 'Мусор', icon: '🗑️' }
+  ];
+
+  // Сколько записей сейчас в архиве
+  function archiveCount() {
+    let n = 0;
+    Object.keys(Data.state.archives || {}).forEach(y => {
+      n += (Data.state.archives[y] || []).length;
+    });
+    return n;
+  }
+
+  // Полная резервная копия базы — для скачивания
+  function fullBackup() {
+    return {
+      schema: 1,
+      app: 'Коммуналка',
+      exported: new Date().toISOString(),
+      records: Data.state.records,
+      archives: Data.state.archives,
+      residents: Data.state.residents,
+      tariffs: Data.state.tariffs
+    };
+  }
+
+  // Сегодня в виде ГГГГ-ММ-ДД — для имён файлов
+  function fileStamp() {
+    const d = new Date();
+    return d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0');
+  }
+
+  // Все записи: активные + архив (для истории тарифов)
+  function allRecords() {
+    const all = Data.state.records.slice();
+    Object.keys(Data.state.archives || {}).forEach(y =>
+      (Data.state.archives[y] || []).forEach(r => all.push(r)));
+    return all;
+  }
+
+  // История тарифов услуги: пары «период · тариф», от свежих к старым
+  function tariffHistory(service) {
+    const seen = new Set();
+    const rows = [];
+    allRecords()
+      .filter(r => r.service === service && Logic.toNum(r.tariff) !== null)
+      .sort((a, b) =>
+        Logic.periodNum(b.period_year, b.period_month) -
+        Logic.periodNum(a.period_year, a.period_month))
+      .forEach(r => {
+        const t = Logic.toNum(r.tariff);
+        const label = Logic.periodLabel(r.period_year, r.period_month);
+        const k = label + '|' + t;
+        if (!seen.has(k)) { seen.add(k); rows.push({ label: label, tariff: t }); }
+      });
+    return rows;
+  }
+
+  // Прочитать файл импорта: JSON или CSV
+  async function readImportFile(f) {
+    if (/\.json$/i.test(f.name)) return JSON.parse(await f.text());
+    if (/\.csv$/i.test(f.name)) return Pack.parseCSV(await f.text());
+    throw new Error('Формат файла не поддерживается');
+  }
+
+  // Применить импорт в выбранном режиме; вернуть текст для уведомления
+  function applyImport(data, mode) {
+    const recs = Array.isArray(data)
+      ? data
+      : (data && Array.isArray(data.records) ? data.records : null);
+    if (!recs) throw new Error('В файле нет записей');
+
+    if (mode === 'replace') {
+      Data.replaceAll(data);
+      return 'База заменена из файла · записей: ' + Data.state.records.length +
+        ' · в архиве: ' + archiveCount();
+    }
+
+    const res = Data.mergeRecords(recs);
+    let arch = 0;
+    if (!Array.isArray(data) && data && data.archives) {
+      const flat = [];
+      Object.keys(data.archives).forEach(y =>
+        (data.archives[y] || []).forEach(r => flat.push(r)));
+      arch = Data.addArchived(flat);
+    }
+    return 'Добавлено: ' + res.added + ' · Обновлено: ' + res.updated +
+      (arch ? ' · В архив добавлено: ' + arch : '');
+  }
+
+  // Блок «загрузка из файла»: режим + кнопка выбора файла.
+  // После чтения файла — слияние сразу, полная замена после подтверждения.
+  function buildImportBlock(card, accept, modeLabel) {
+    card.appendChild(el('div', 'sett-label', modeLabel));
+    const mode = el('select', 'inp');
+    [
+      ['merge', 'Умное слияние (рекомендуется)'],
+      ['replace', 'Полная замена базы']
+    ].forEach(o => {
+      const op = el('option', null, o[1]);
+      op.value = o[0];
+      mode.appendChild(op);
+    });
+    card.appendChild(mode);
+
+    const inp = el('input');
+    inp.type = 'file';
+    inp.accept = accept;
+    inp.className = 'inp';
+    card.appendChild(inp);
+    card.appendChild(el('div', 'fhint',
+      'Умное слияние: новые записи добавятся, в совпавших останутся более свежие. ' +
+      'Полная замена: текущая база будет стёрта и заменена файлом.'));
+
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0];
+      if (!f) return;
+      const m = mode.value;
+      try {
+        const data = await readImportFile(f);
+        if (m === 'replace') {
+          confirmDialog(
+            'Полная замена: все текущие записи и архив будут стёрты ' +
+            'и заменены содержимым файла. Продолжить?', () => {
+              try {
+                toast(applyImport(data, 'replace'));
+                renderSettingsInfo();
+              } catch (e) {
+                console.error(e);
+                toast('Не удалось импортировать');
+              }
+            }, 'Заменить');
+        } else {
+          try {
+            toast(applyImport(data, 'merge'));
+            renderSettingsInfo();
+          } catch (e) {
+            console.error(e);
+            toast('Не удалось импортировать');
+          }
+        }
+      } catch (e) {
+        console.error(e);
+        toast('Не удалось прочитать файл');
+      }
+      inp.value = '';
+    });
+  }
 
   function renderSettingsInfo() {
     const root = document.getElementById('settings-info');
     if (!root) return;
     root.innerHTML = '';
 
-    const card = el('div', 'info-card');
+    // ----- Хранилище -----
+    const card0 = el('div', 'info-card');
     if (Data.isHealthy()) {
-      card.appendChild(el('div', null, '✅ Хранилище работает'));
-      card.appendChild(el('div', 'muted',
-        'Запусков приложения: ' + (Data.state.prefs.launches || 1) +
-        ' · Записей в базе: ' + Data.state.records.length));
+      card0.appendChild(el('div', null, '✅ Хранилище работает'));
+      card0.appendChild(el('div', 'muted',
+        'Записей в базе: ' + Data.state.records.length +
+        ' · В архиве: ' + archiveCount() +
+        ' · Запусков: ' + (Data.state.prefs.launches || 1)));
     } else {
-      card.appendChild(el('div', null,
+      card0.appendChild(el('div', null,
         '⚠️ Хранилище недоступно — данные не будут сохраняться'));
     }
-    root.appendChild(card);
+    root.appendChild(card0);
 
+    // ----- Тарифы -----
+    const card1 = el('div', 'info-card');
+    card1.appendChild(el('div', null, '🏷️ Тарифы по услугам'));
+    card1.appendChild(el('div', 'muted',
+      'Действующий тариф — последний введённый в карточке. ' +
+      'Он подтягивается в новые месяцы, пока его не изменить.'));
+    TARIFF_SERVICES.forEach(s => {
+      const active = Logic.activeTariff(Data.state.records, s.key);
+      const row = el('div', 'sett-row');
+      row.appendChild(el('div', 'sett-name', s.icon + ' ' + s.key));
+      row.appendChild(el('div', 'sett-val' + (active === null ? ' none' : ''),
+        active === null ? 'пока не задан' : Logic.fmtMoney(active)));
+      card1.appendChild(row);
+
+      const hist = tariffHistory(s.key);
+      if (hist.length > 1) {
+        const det = el('details', 'tar-details');
+        det.appendChild(el('summary', null,
+          'История изменений · ' + hist.length));
+        hist.forEach(h => {
+          const hr = el('div', 'tar-row');
+          hr.appendChild(el('span', 'tar-period', h.label));
+          hr.appendChild(el('span', 'tar-val', Logic.fmtMoney(h.tariff)));
+          det.appendChild(hr);
+        });
+        card1.appendChild(det);
+      }
+    });
+    root.appendChild(card1);
+
+    // ----- Жильцы -----
     const card2 = el('div', 'info-card');
-    card2.appendChild(el('div', null, '🔧 Собрано: этапы 1–6 из 8'));
+    card2.appendChild(el('div', null, '👨‍👩‍👧 Жильцы по адресам'));
     card2.appendChild(el('div', 'muted',
-      'Дальше: тарифы/жильцы/импорт-экспорт (этап 7), упаковка в EXE/APK (этап 8).'));
+      'Подставляются в карточку «Мусор» для новых месяцев. ' +
+      'Если изменить жильцов в самой карточке — новое значение тоже запомнится.'));
+    const resInputs = {};
+    Object.keys(Data.state.residents).forEach(addr => {
+      const inp = numInput(Data.state.residents[addr]);
+      inp.inputMode = 'numeric';
+      resInputs[addr] = inp;
+      card2.appendChild(fieldRow(addr, inp));
+    });
+    const resSave = el('button', 'btn btn-save', 'Сохранить жильцов');
+    resSave.type = 'button';
+    resSave.addEventListener('click', () => {
+      Object.keys(resInputs).forEach(addr => {
+        const v = Logic.toNum(resInputs[addr].value);
+        if (v !== null) Data.state.residents[addr] = Math.max(0, Math.round(v));
+      });
+      Data.persist();
+      toast('Жильцы сохранены');
+      renderSettingsInfo();
+    });
+    const rr = el('div', 'btn-row');
+    rr.appendChild(resSave);
+    card2.appendChild(rr);
     root.appendChild(card2);
+
+    // ----- Резервная копия JSON -----
+    const card3 = el('div', 'info-card');
+    card3.appendChild(el('div', null, '📦 Резервная копия (JSON)'));
+    card3.appendChild(el('div', 'muted',
+      'В файл попадает всё: записи, архив, тарифы и жильцы. ' +
+      'Это копия для переноса на другое устройство или для сохранности.'));
+    const jBtn = el('button', 'btn btn-ghost', '⬇️ Скачать базу (JSON)');
+    jBtn.type = 'button';
+    jBtn.addEventListener('click', () => {
+      Pack.download('kommyn-baza-' + fileStamp() + '.json',
+        JSON.stringify(fullBackup(), null, 2));
+      toast('Резервная копия скачана');
+    });
+    const jr = el('div', 'btn-row');
+    jr.appendChild(jBtn);
+    card3.appendChild(jr);
+    buildImportBlock(card3, '.json', 'Загрузка из JSON-файла');
+    root.appendChild(card3);
+
+    // ----- CSV -----
+    const card4 = el('div', 'info-card');
+    card4.appendChild(el('div', null, '📄 Записи в CSV'));
+    card4.appendChild(el('div', 'muted',
+      'Записи таблицей (разделитель «;», открывается в Excel). ' +
+      'Шаблон — пустой файл со всеми колонками, чтобы собрать базу заново.'));
+    const cExp = el('button', 'btn btn-ghost', '⬇️ Скачать записи (CSV)');
+    cExp.type = 'button';
+    cExp.addEventListener('click', () => {
+      Pack.download('kommyn-zapisi-' + fileStamp() + '.csv',
+        '\ufeff' + Pack.toCSV(Data.state.records));
+      toast('CSV скачан');
+    });
+    const cTpl = el('button', 'btn btn-ghost', '⬇️ Пустой шаблон');
+    cTpl.type = 'button';
+    cTpl.addEventListener('click', () => {
+      Pack.download('kommyn-shablon.csv', '\ufeff' + Pack.toCSV([]));
+      toast('Шаблон скачан');
+    });
+    const cr = el('div', 'btn-row');
+    cr.appendChild(cExp);
+    cr.appendChild(cTpl);
+    card4.appendChild(cr);
+    buildImportBlock(card4, '.csv', 'Загрузка из CSV-файла');
+    root.appendChild(card4);
+
+    // ----- Сброс -----
+    const card5 = el('div', 'info-card');
+    card5.appendChild(el('div', null, '🧹 Сброс данных'));
+    card5.appendChild(el('div', 'muted',
+      'Все записи, архив, тарифы и жильцы будут стёрты. ' +
+      'Сначала скачайте резервную копию, если она нужна.'));
+    const rBtn = el('button', 'btn btn-del', 'Стереть всё');
+    rBtn.type = 'button';
+    rBtn.addEventListener('click', () => {
+      confirmDialog('Стереть ВСЕ данные без возможности возврата?', () => {
+        Data.resetAll();
+        toast('Данные стёрты, начинаем с чистого листа');
+        renderSettingsInfo();
+      }, 'Стереть всё');
+    });
+    const rr5 = el('div', 'btn-row');
+    rr5.appendChild(rBtn);
+    card5.appendChild(rr5);
+    root.appendChild(card5);
+
+    // ----- Этапы -----
+    const card6 = el('div', 'info-card');
+    card6.appendChild(el('div', null, '🔧 Собрано: этапы 1–7 из 8'));
+    card6.appendChild(el('div', 'muted',
+      'Дальше: упаковка в EXE/APK (этап 8).'));
+    root.appendChild(card6);
   }
 
   return { el, toast, renderDashboard, renderHistory, renderReports,

@@ -214,10 +214,86 @@ const Data = (() => {
     return n;
   }
 
+  // ---------- Импорт / сброс (этап 7) ----------
+
+  // Уникальный ключ записи — тот же, по которому ищем записи
+  function sameKey(r, service, address, subservice, year, month) {
+    return r.service === service &&
+      (r.address || null) === (address || null) &&
+      (r.subservice || null) === (subservice || null) &&
+      r.period_year === year &&
+      (r.period_month || null) === (month || null);
+  }
+
+  // Подготовить запись из файла: дать id и техническую дату, если их нет
+  function prepareImported(rec) {
+    const rec2 = Object.assign({}, rec);
+    if (!rec2.id) rec2.id = uid();
+    if (!rec2.technical_date) rec2.technical_date = new Date().toISOString();
+    return rec2;
+  }
+
+  // Умное слияние: записи из файла добавляются, а в совпавших
+  // (уникальный ключ) остаётся более свежая по technical_date.
+  function mergeRecords(incoming) {
+    let added = 0, updated = 0;
+    (incoming || []).forEach(rec => {
+      if (!rec || !rec.service) return;
+      const rec2 = prepareImported(rec);
+      const i = state.records.findIndex(r =>
+        sameKey(r, rec2.service, rec2.address, rec2.subservice,
+          rec2.period_year, rec2.period_month));
+      if (i < 0) { state.records.push(rec2); added++; }
+      else if (String(rec2.technical_date || '') >
+               String(state.records[i].technical_date || '')) {
+        state.records[i] = rec2; updated++;
+      }
+    });
+    if (added || updated) persist();
+    return { added: added, updated: updated };
+  }
+
+  // Полная замена: база целиком становится такой, как в файле.
+  // Принимает и массив записей, и полную копию {records, archives, ...}.
+  function replaceAll(data) {
+    const fresh = emptyState();
+    fresh.prefs.launches = (state.prefs && state.prefs.launches) || 0;
+    const recs = Array.isArray(data) ? data : (data && data.records) || [];
+    recs.forEach(rec => {
+      if (!rec || !rec.service) return;
+      fresh.records.push(prepareImported(rec));
+    });
+    if (!Array.isArray(data) && data && data.archives) {
+      Object.keys(data.archives).forEach(y => {
+        const list = [];
+        (data.archives[y] || []).forEach(rec => {
+          if (!rec || !rec.service) return;
+          list.push(prepareImported(rec));
+        });
+        if (list.length) fresh.archives[y] = list;
+      });
+    }
+    if (!Array.isArray(data) && data) {
+      if (data.residents) fresh.residents = Object.assign(fresh.residents, data.residents);
+      if (data.tariffs) fresh.tariffs = data.tariffs;
+    }
+    state = fresh;
+    persist();
+  }
+
+  // Полный сброс: стереть всё и начать с чистого листа
+  function resetAll() {
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    state = emptyState();
+    state.prefs.launches = 1;
+    persist();
+  }
+
   return {
     init, persist, uid, isHealthy,
     findRecord, upsertRecord, removeRecord,
     autoArchive, archiveRecords, restoreRecords, addArchived,
+    mergeRecords, replaceAll, resetAll,
     get state() { return state; }
   };
 })();
