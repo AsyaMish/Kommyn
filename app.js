@@ -63,6 +63,7 @@ const App = (() => {
     if (title) title.textContent = TITLES[id] || '';
     if (id === 'dashboard') UI.renderDashboard();
     if (id === 'history') UI.renderHistory();
+    if (id === 'reports') UI.renderReports();
     if (id === 'settings') UI.renderSettingsInfo();
     window.scrollTo(0, 0);
   }

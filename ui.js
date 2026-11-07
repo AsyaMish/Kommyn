@@ -807,6 +807,649 @@ const UI = (() => {
     root.appendChild(listBox);
   }
 
+  // ---------- Раздел «Отчёты» (этап 5) ----------
+
+  const REP_METRICS = { fact: 'Факт оплаты', accrued: 'Начислено', debt: 'Долг/Аванс' };
+  const REP_BUCKETS = ['Рабочая 23', 'Рабочая 23А', 'none'];
+  const BUCKET_LABEL = { 'Рабочая 23': '23', 'Рабочая 23А': '23А', none: 'б/а' };
+  const MONTHS_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
+                        'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+
+  // Состояние раздела — сохраняется, пока открыто приложение
+  const rep = {
+    dMonth: null, dYear: null,     // «Сравнение месяцев»: текущий месяц
+    type: 'summary',               // summary | compare | detail
+    metric: 'fact',                // fact | accrued | debt
+    ptype: 'month',                // month | year | range
+    pMonth: null, pYear: null,     // период «месяц»
+    pYearSel: null,                // период «год»
+    pFrom: '', pTo: '',            // период «диапазон»
+    aType: 'month', aMonth: null, aYear: null,   // сравнительный: период A
+    bType: 'month', bMonth: null, bYear: null,   // сравнительный: период B
+    fAddress: '', fService: '', fUnpaid: false, fNoReadings: false
+  };
+
+  function repInit() {
+    if (rep.dMonth === null) { rep.dMonth = App.period.month; rep.dYear = App.period.year; }
+    if (rep.pMonth === null) { rep.pMonth = App.period.month; rep.pYear = App.period.year; }
+    if (rep.pYearSel === null) rep.pYearSel = App.period.year;
+    if (rep.aMonth === null) {
+      const prev = repShift({ y: App.period.year, m: App.period.month }, -1);
+      rep.aMonth = prev.m; rep.aYear = prev.y;
+      rep.bMonth = App.period.month; rep.bYear = App.period.year;
+    }
+  }
+
+  function repShift(p, delta) {
+    let m = p.m + delta, y = p.y;
+    if (m < 1) { m = 12; y--; }
+    if (m > 12) { m = 1; y++; }
+    return { y: y, m: m };
+  }
+
+  function repKinds() {
+    const k = {};
+    SERVICES.forEach(c => { k[c.key] = c.kind; });
+    return k;
+  }
+
+  function isAnnualRec(r) { return r.record_type === 'annual'; }
+
+  function repYears() {
+    const set = new Set([new Date().getFullYear()]);
+    Data.state.records.forEach(r => {
+      if (r.period_year) set.add(Number(r.period_year));
+      if (r.payment_date) set.add(Number(String(r.payment_date).slice(0, 4)));
+    });
+    return Array.from(set).sort((a, b) => b - a);
+  }
+
+  function monthOpts() {
+    return Logic.MONTHS.map((n, i) => ({ value: String(i + 1), label: n }));
+  }
+
+  function yearOpts() {
+    return repYears().map(y => ({ value: String(y), label: String(y) }));
+  }
+
+  // Начислено «по формуле», без учёта долга/аванса
+  function recAccrued(r) {
+    const k = repKinds()[r.service];
+    if (k === 'readings') {
+      const p = Logic.toNum(r.previous_readings),
+            c = Logic.toNum(r.current_readings),
+            t = Logic.toNum(r.tariff);
+      if (p === null || c === null || t === null) return null;
+      return Logic.round2((c - p) * t);
+    }
+    if (k === 'trash') {
+      const n = Logic.toNum(r.residents_count), t = Logic.toNum(r.tariff);
+      if (n === null || t === null) return null;
+      return Logic.round2(n * t);
+    }
+    if (k === 'taxes') {
+      const h = Logic.toNum(r.tax_house), l = Logic.toNum(r.tax_land),
+            cr = Logic.toNum(r.tax_car);
+      if (h === null && l === null && cr === null) return null;
+      return Logic.round2((h || 0) + (l || 0) + (cr || 0));
+    }
+    return null;   // интернет и телевидение — начисленной суммы нет
+  }
+
+  function recMetric(r, metric) {
+    if (metric === 'fact') return Logic.toNum(r.fact_payment);
+    if (metric === 'accrued') return recAccrued(r);
+    return Logic.toNum(r.debt_advance);
+  }
+
+  // Попадает ли запись в месяц: помесячные — по периоду,
+  // годовые — по месяцу даты оплаты
+  function recInMonth(r, y, m) {
+    if (isAnnualRec(r)) {
+      return !!(r.payment_date &&
+        r.payment_date.startsWith(y + '-' + String(m).padStart(2, '0')));
+    }
+    return r.period_year === y && r.period_month === m;
+  }
+
+  function recInYear(r, y) {
+    return Number(r.period_year) === Number(y);
+  }
+
+  function recInRange(r, from, to) {
+    const pd = r.payment_date;
+    if (!pd) return false;
+    if (from && pd < from) return false;
+    if (to && pd > to) return false;
+    return true;
+  }
+
+  // Записи после фильтров конструктора + периода
+  function repRecords(mode) {
+    let list = Data.state.records.slice();
+    if (rep.fService) list = list.filter(r => r.service === rep.fService);
+    if (rep.fAddress) list = list.filter(r => (r.address || 'none') === rep.fAddress);
+    const kinds = repKinds();
+    if (rep.fUnpaid || rep.fNoReadings) {
+      list = list.filter(r =>
+        (rep.fUnpaid && !r.flag_paid) ||
+        (rep.fNoReadings && kinds[r.service] === 'readings' &&
+          !r.flag_readings_submitted));
+    }
+    return list.filter(r => {
+      if (mode.kind === 'month') return recInMonth(r, mode.y, mode.m);
+      if (mode.kind === 'year') return recInYear(r, mode.y);
+      return recInRange(r, mode.from, mode.to);
+    });
+  }
+
+  // Сумма метрики по набору записей; service/bucket = null — без фильтра
+  function sumMetric(records, service, bucket, metric) {
+    let s = null;
+    records.forEach(r => {
+      if (service !== null && r.service !== service) return;
+      if (bucket !== null && (r.address || 'none') !== bucket) return;
+      const v = recMetric(r, metric);
+      if (v !== null) s = (s === null ? 0 : s) + v;
+    });
+    return s === null ? null : Logic.round2(s);
+  }
+
+  function repTable(minWidth) {
+    const wrap = el('div', 'rep-scroll');
+    const t = el('table', 'rep-table');
+    if (minWidth) t.style.minWidth = minWidth + 'px';
+    wrap.appendChild(t);
+    return { wrap: wrap, t: t };
+  }
+
+  function moneyCell(value) {
+    const td = el('td', 'rep-num' + (value === null ? ' none' : ''));
+    td.textContent = Logic.fmtMoney(value);
+    return td;
+  }
+
+  function debtCell(value) {
+    const td = moneyCell(value);
+    if (value !== null && value > 0) td.classList.add('rep-pos');
+    if (value !== null && value < 0) td.classList.add('rep-neg');
+    return td;
+  }
+
+  function diffCell(a, b) {
+    const td = el('td', 'rep-num');
+    if (a === null && b === null) {
+      td.classList.add('none');
+      td.textContent = '—';
+      return td;
+    }
+    const d = Logic.round2((b === null ? 0 : b) - (a === null ? 0 : a));
+    td.textContent = (d > 0 ? '+' : '') + Logic.fmtMoney(d);
+    return td;
+  }
+
+  function emptyBox(text) { return el('div', 'placeholder-box', text); }
+
+  function resultBox(subtitleText) {
+    const box = el('div', 'rep-result');
+    if (subtitleText) box.appendChild(el('div', 'rep-subtitle', subtitleText));
+    return box;
+  }
+
+  function histChip(labelText, checked, onChange) {
+    const lab = el('label', 'hist-chip');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = !!checked;
+    box.addEventListener('change', () => onChange(box.checked));
+    lab.appendChild(box);
+    lab.appendChild(el('span', null, labelText));
+    return lab;
+  }
+
+  // ----- Карточка «Сравнение месяцев» (отчёт по умолчанию) -----
+
+  function buildDefaultCard() {
+    const card = el('div', 'rep-block');
+    card.appendChild(el('div', 'rep-title', '📊 Сравнение месяцев'));
+    card.appendChild(el('div', 'rep-note',
+      'В ячейках — факт оплаты. «б/а» — без адреса (интернет, телевидение). ' +
+      'Годовые услуги попадают в месяц фактической оплаты.'));
+
+    const row = el('div', 'hist-panel-row');
+    row.appendChild(histSelect('Месяц', monthOpts(), String(rep.dMonth),
+      v => { rep.dMonth = Number(v); renderReports(); }));
+    row.appendChild(histSelect('Год', yearOpts(), String(rep.dYear),
+      v => { rep.dYear = Number(v); renderReports(); }));
+    card.appendChild(row);
+
+    const cur = { y: rep.dYear, m: rep.dMonth };
+    const prev = repShift(cur, -1);
+    const inPrev = Data.state.records.filter(r => recInMonth(r, prev.y, prev.m));
+    const inCur = Data.state.records.filter(r => recInMonth(r, cur.y, cur.m));
+
+    // Годовые услуги показываем, только если оплачены в один из двух месяцев
+    const annualShown = ['Телевидение', 'Налоги'].filter(svc =>
+      inPrev.concat(inCur).some(r => r.service === svc && isAnnualRec(r)));
+
+    const rows = ['Газ', 'Вода', 'Свет', 'Мусор', 'Интернет'].concat(annualShown);
+
+    const totals = {
+      prev: { 'Рабочая 23': null, 'Рабочая 23А': null, none: null },
+      cur: { 'Рабочая 23': null, 'Рабочая 23А': null, none: null }
+    };
+    function addTot(g, b, v) {
+      if (v !== null) g[b] = Logic.round2((g[b] || 0) + v);
+    }
+
+    const built = repTable(620);
+    const thead = el('thead');
+    const tr1 = el('tr');
+    const thName = el('th', null, 'Услуга');
+    thName.rowSpan = 2;
+    tr1.appendChild(thName);
+    const thPrev = el('th', 'rep-group',
+      'Предыдущий · ' + Logic.MONTHS[prev.m - 1] + ' ' + prev.y);
+    thPrev.colSpan = 3;
+    const thCur = el('th', 'rep-group',
+      'Текущий · ' + Logic.MONTHS[cur.m - 1] + ' ' + cur.y);
+    thCur.colSpan = 3;
+    tr1.appendChild(thPrev);
+    tr1.appendChild(thCur);
+    thead.appendChild(tr1);
+
+    const tr2 = el('tr');
+    REP_BUCKETS.concat(REP_BUCKETS).forEach(b =>
+      tr2.appendChild(el('th', null, BUCKET_LABEL[b])));
+    thead.appendChild(tr2);
+    built.t.appendChild(thead);
+
+    const tbody = el('tbody');
+    rows.forEach(svc => {
+      const cfg = SERVICES.find(c => c.key === svc);
+      const tr = el('tr');
+      tr.appendChild(el('td', 'rep-name', (cfg ? cfg.icon + ' ' : '') + svc));
+      [['prev', inPrev], ['cur', inCur]].forEach(pair => {
+        REP_BUCKETS.forEach(b => {
+          const v = sumMetric(pair[1], svc, b, 'fact');
+          addTot(totals[pair[0]], b, v);
+          tr.appendChild(moneyCell(v));
+        });
+      });
+      tbody.appendChild(tr);
+    });
+
+    const trT = el('tr', 'rep-total');
+    trT.appendChild(el('td', null, 'Итого'));
+    ['prev', 'cur'].forEach(key => {
+      REP_BUCKETS.forEach(b => trT.appendChild(moneyCell(totals[key][b])));
+    });
+    tbody.appendChild(trT);
+
+    const trG = el('tr', 'rep-grand');
+    trG.appendChild(el('td', null, 'Всего за месяц'));
+    ['prev', 'cur'].forEach(key => {
+      const g = Logic.round2(REP_BUCKETS.reduce(
+        (s, b) => s + (totals[key][b] || 0), 0));
+      trG.appendChild(moneyCell(g));
+    });
+    tbody.appendChild(trG);
+
+    built.t.appendChild(tbody);
+    card.appendChild(built.wrap);
+    return card;
+  }
+
+  // ----- Конструктор: период и режимы -----
+
+  function currentMode() {
+    if (rep.ptype === 'month') return { kind: 'month', y: rep.pYear, m: rep.pMonth };
+    if (rep.ptype === 'year') return { kind: 'year', y: rep.pYearSel };
+    return { kind: 'range', from: rep.pFrom, to: rep.pTo };
+  }
+
+  function modeLabel(mode) {
+    if (mode.kind === 'month') return Logic.periodLabel(mode.y, mode.m);
+    if (mode.kind === 'year') return mode.y + ' год';
+    return 'оплата ' + fmtDate(mode.from) + ' — ' + fmtDate(mode.to);
+  }
+
+  function periodRow() {
+    const row = el('div', 'hist-panel-row');
+    row.appendChild(histSelect('Период', [
+      { value: 'month', label: 'Месяц' },
+      { value: 'year', label: 'Год' },
+      { value: 'range', label: 'Диапазон дат оплаты' }
+    ], rep.ptype, v => { rep.ptype = v; renderReports(); }));
+    if (rep.ptype === 'month') {
+      row.appendChild(histSelect('Месяц', monthOpts(), String(rep.pMonth),
+        v => { rep.pMonth = Number(v); renderReports(); }));
+      row.appendChild(histSelect('Год', yearOpts(), String(rep.pYear),
+        v => { rep.pYear = Number(v); renderReports(); }));
+    } else if (rep.ptype === 'year') {
+      row.appendChild(histSelect('Год', yearOpts(), String(rep.pYearSel),
+        v => { rep.pYearSel = Number(v); renderReports(); }));
+    } else {
+      row.appendChild(histDate('Оплата с', rep.pFrom,
+        v => { rep.pFrom = v; renderReports(); }));
+      row.appendChild(histDate('Оплата по', rep.pTo,
+        v => { rep.pTo = v; renderReports(); }));
+      const hint = el('div', 'fhint',
+        'Фильтр по дате оплаты; записи без даты оплаты не попадут в отчёт.');
+      hint.style.flexBasis = '100%';
+      row.appendChild(hint);
+    }
+    return row;
+  }
+
+  function compareMode(side) {
+    if (rep[side + 'Type'] === 'month') {
+      return { kind: 'month', y: rep[side + 'Year'], m: rep[side + 'Month'] };
+    }
+    return { kind: 'year', y: rep[side + 'Year'] };
+  }
+
+  function comparePeriodRow(title, side) {
+    const row = el('div', 'hist-panel-row');
+    row.appendChild(el('div', 'rep-side-title', title));
+    row.appendChild(histSelect('Тип периода', [
+      { value: 'month', label: 'Месяц' },
+      { value: 'year', label: 'Год' }
+    ], rep[side + 'Type'], v => { rep[side + 'Type'] = v; renderReports(); }));
+    if (rep[side + 'Type'] === 'month') {
+      row.appendChild(histSelect('Месяц', monthOpts(), String(rep[side + 'Month']),
+        v => { rep[side + 'Month'] = Number(v); renderReports(); }));
+    }
+    row.appendChild(histSelect('Год', yearOpts(), String(rep[side + 'Year']),
+      v => { rep[side + 'Year'] = Number(v); renderReports(); }));
+    return row;
+  }
+
+  // ----- Сводный отчёт -----
+
+  function buildSummary() {
+    const mode = currentMode();
+    const recs = repRecords(mode);
+    const box = resultBox(
+      'Сводный · ' + modeLabel(mode) + ' · ' + REP_METRICS[rep.metric] +
+      ' · записей: ' + recs.length);
+    if (!recs.length) {
+      box.appendChild(emptyBox('Нет записей за выбранный период — измените параметры.'));
+      return box;
+    }
+
+    const built = repTable(rep.ptype === 'year' ? 880 : 560);
+    const thead = el('thead');
+    const theadTr = el('tr');
+    theadTr.appendChild(el('th', null, 'Услуга'));
+    if (rep.ptype === 'year') {
+      MONTHS_SHORT.forEach(mn => theadTr.appendChild(el('th', null, mn)));
+      theadTr.appendChild(el('th', null, 'За год'));
+    } else {
+      REP_BUCKETS.forEach(b => theadTr.appendChild(el('th', null, BUCKET_LABEL[b])));
+      theadTr.appendChild(el('th', null, 'Сумма'));
+    }
+    thead.appendChild(theadTr);
+    built.t.appendChild(thead);
+
+    const tbody = el('tbody');
+    const grandMonths = new Array(12).fill(null);
+    const grandAddr = { 'Рабочая 23': null, 'Рабочая 23А': null, none: null, sum: null };
+
+    SERVICES.forEach(cfg => {
+      const svcRecs = recs.filter(r => r.service === cfg.key);
+      if (!svcRecs.length) return;   // пустые строки не рисуем
+      const tr = el('tr');
+      tr.appendChild(el('td', 'rep-name', cfg.icon + ' ' + cfg.key));
+
+      if (rep.ptype === 'year') {
+        for (let m = 1; m <= 12; m++) {
+          const monthRecs = svcRecs.filter(r => isAnnualRec(r)
+            ? !!(r.payment_date && r.payment_date.startsWith(
+                rep.pYearSel + '-' + String(m).padStart(2, '0')))
+            : r.period_month === m);
+          const v = sumMetric(monthRecs, null, null, rep.metric);
+          if (v !== null) {
+            grandMonths[m - 1] = Logic.round2((grandMonths[m - 1] || 0) + v);
+          }
+          tr.appendChild(moneyCell(v));
+        }
+        const vTotal = sumMetric(svcRecs, null, null, rep.metric);
+        if (vTotal !== null) {
+          grandAddr.sum = Logic.round2((grandAddr.sum || 0) + vTotal);
+        }
+        tr.appendChild(moneyCell(vTotal));
+      } else {
+        REP_BUCKETS.forEach(b => {
+          const v = sumMetric(svcRecs, null, b, rep.metric);
+          if (v !== null) grandAddr[b] = Logic.round2((grandAddr[b] || 0) + v);
+          tr.appendChild(moneyCell(v));
+        });
+        const vSum = sumMetric(svcRecs, null, null, rep.metric);
+        if (vSum !== null) {
+          grandAddr.sum = Logic.round2((grandAddr.sum || 0) + vSum);
+        }
+        tr.appendChild(moneyCell(vSum));
+      }
+      tbody.appendChild(tr);
+    });
+
+    const trT = el('tr', 'rep-total');
+    trT.appendChild(el('td', null, 'Итого'));
+    if (rep.ptype === 'year') {
+      grandMonths.forEach(v => trT.appendChild(moneyCell(v)));
+      trT.appendChild(moneyCell(grandAddr.sum));
+    } else {
+      REP_BUCKETS.forEach(b => trT.appendChild(moneyCell(grandAddr[b])));
+      trT.appendChild(moneyCell(grandAddr.sum));
+    }
+    tbody.appendChild(trT);
+
+    built.t.appendChild(tbody);
+    box.appendChild(built.wrap);
+    return box;
+  }
+
+  // ----- Сравнительный отчёт -----
+
+  function buildCompare() {
+    const modeA = compareMode('a');
+    const modeB = compareMode('b');
+    const recsA = repRecords(modeA);
+    const recsB = repRecords(modeB);
+    const labelA = modeLabel(modeA);
+    const labelB = modeLabel(modeB);
+
+    const box = resultBox(
+      'Сравнительный · ' + labelA + ' и ' + labelB + ' · ' + REP_METRICS[rep.metric]);
+    if (!recsA.length && !recsB.length) {
+      box.appendChild(emptyBox('Нет записей за выбранные периоды — измените параметры.'));
+      return box;
+    }
+
+    const built = repTable(560);
+    const thead = el('thead');
+    const tr = el('tr');
+    tr.appendChild(el('th', null, 'Услуга'));
+    tr.appendChild(el('th', null, labelA));
+    tr.appendChild(el('th', null, labelB));
+    tr.appendChild(el('th', null, 'Разница'));
+    thead.appendChild(tr);
+    built.t.appendChild(thead);
+
+    const tbody = el('tbody');
+    let totA = null, totB = null;
+
+    SERVICES.forEach(cfg => {
+      const vA = sumMetric(recsA, cfg.key, null, rep.metric);
+      const vB = sumMetric(recsB, cfg.key, null, rep.metric);
+      if (vA === null && vB === null) return;
+      if (vA !== null) totA = Logic.round2((totA || 0) + vA);
+      if (vB !== null) totB = Logic.round2((totB || 0) + vB);
+      const row = el('tr');
+      row.appendChild(el('td', 'rep-name', cfg.icon + ' ' + cfg.key));
+      row.appendChild(moneyCell(vA));
+      row.appendChild(moneyCell(vB));
+      row.appendChild(diffCell(vA, vB));
+      tbody.appendChild(row);
+    });
+
+    const trT = el('tr', 'rep-total');
+    trT.appendChild(el('td', null, 'Итого'));
+    trT.appendChild(moneyCell(totA));
+    trT.appendChild(moneyCell(totB));
+    trT.appendChild(diffCell(totA, totB));
+    tbody.appendChild(trT);
+
+    built.t.appendChild(tbody);
+    box.appendChild(built.wrap);
+    return box;
+  }
+
+  // ----- Детализация -----
+
+  function buildDetail() {
+    const mode = currentMode();
+    const recs = repRecords(mode);
+    recs.sort((a, b) =>
+      (a.period_year - b.period_year) ||
+      ((a.period_month || 12) - (b.period_month || 12)) ||
+      a.service.localeCompare(b.service, 'ru'));
+
+    const box = resultBox(
+      'Детализация · ' + modeLabel(mode) + ' · записей: ' + recs.length);
+    if (!recs.length) {
+      box.appendChild(emptyBox('Нет записей за выбранный период — измените параметры.'));
+      return box;
+    }
+
+    const built = repTable(660);
+    const thead = el('thead');
+    const tr = el('tr');
+    ['Период', 'Услуга', 'Адрес', 'Факт', 'Начислено', 'Долг/аванс', 'Метки']
+      .forEach((h, i) => {
+        tr.appendChild(el('th', (i < 3 || i === 6) ? 'rep-left' : null, h));
+      });
+    thead.appendChild(tr);
+    built.t.appendChild(thead);
+
+    const tbody = el('tbody');
+    let totFact = null, totAcc = null, totDebt = null;
+
+    recs.forEach(r => {
+      const cfg = SERVICES.find(c => c.key === r.service);
+      const tr = el('tr');
+      tr.appendChild(el('td', 'rep-left',
+        Logic.periodLabel(r.period_year, r.period_month)));
+
+      let name = (cfg ? cfg.icon + ' ' : '') + r.service;
+      if (r.subservice) name += ' · ' + r.subservice;
+      tr.appendChild(el('td', 'rep-left', name));
+      tr.appendChild(el('td', 'rep-left', r.address || '—'));
+
+      const f = Logic.toNum(r.fact_payment);
+      const a = recAccrued(r);
+      const d = Logic.toNum(r.debt_advance);
+      if (f !== null) totFact = Logic.round2((totFact || 0) + f);
+      if (a !== null) totAcc = Logic.round2((totAcc || 0) + a);
+      if (d !== null) totDebt = Logic.round2((totDebt || 0) + d);
+
+      tr.appendChild(moneyCell(f));
+      tr.appendChild(moneyCell(a));
+      tr.appendChild(debtCell(d));
+
+      const tdB = el('td', 'rep-left rep-badge-cell');
+      if (r.flag_paid) tdB.appendChild(el('span', 'rep-badge ok', 'оплачено'));
+      if (cfg && cfg.kind === 'readings' && r.flag_readings_submitted) {
+        tdB.appendChild(el('span', 'rep-badge read', 'показания'));
+      }
+      if (!tdB.childNodes.length) tdB.textContent = '—';
+      tr.appendChild(tdB);
+      tbody.appendChild(tr);
+    });
+
+    const trT = el('tr', 'rep-total');
+    trT.appendChild(el('td', 'rep-left', 'Итого'));
+    trT.appendChild(el('td', null, ''));
+    trT.appendChild(el('td', null, ''));
+    trT.appendChild(moneyCell(totFact));
+    trT.appendChild(moneyCell(totAcc));
+    trT.appendChild(debtCell(totDebt));
+    trT.appendChild(el('td', null, ''));
+    tbody.appendChild(trT);
+
+    built.t.appendChild(tbody);
+    box.appendChild(built.wrap);
+    return box;
+  }
+
+  // ----- Сборка страницы «Отчёты» -----
+
+  function buildConstructorCard() {
+    const card = el('div', 'rep-block');
+    card.appendChild(el('div', 'rep-title', '🧩 Конструктор отчёта'));
+    card.appendChild(el('div', 'rep-note',
+      'Настройте параметры — отчёт построится сразу. ' +
+      '«Начислено» — сумма по формуле без учёта долга/аванса; ' +
+      'у интернета и телевидения начисленной суммы нет.'));
+
+    const row1 = el('div', 'hist-panel-row');
+    row1.appendChild(histSelect('Тип отчёта', [
+      { value: 'summary', label: 'Сводный' },
+      { value: 'compare', label: 'Сравнительный' },
+      { value: 'detail', label: 'Детализация' }
+    ], rep.type, v => { rep.type = v; renderReports(); }));
+    if (rep.type !== 'detail') {
+      row1.appendChild(histSelect('Значение', [
+        { value: 'fact', label: 'Факт оплаты' },
+        { value: 'accrued', label: 'Начислено (по формуле)' },
+        { value: 'debt', label: 'Долг/Аванс' }
+      ], rep.metric, v => { rep.metric = v; renderReports(); }));
+    }
+    card.appendChild(row1);
+
+    if (rep.type === 'compare') {
+      card.appendChild(comparePeriodRow('Период A', 'a'));
+      card.appendChild(comparePeriodRow('Период B', 'b'));
+    } else {
+      card.appendChild(periodRow());
+    }
+
+    const rowF = el('div', 'hist-panel-row');
+    rowF.appendChild(histSelect('Адрес', [
+      { value: '', label: 'Все адреса' },
+      { value: 'Рабочая 23', label: 'Рабочая 23' },
+      { value: 'Рабочая 23А', label: 'Рабочая 23А' },
+      { value: 'none', label: 'Без адреса' }
+    ], rep.fAddress, v => { rep.fAddress = v; renderReports(); }));
+    rowF.appendChild(histSelect('Услуга',
+      [{ value: '', label: 'Все услуги' }].concat(
+        SERVICES.map(c => ({ value: c.key, label: c.icon + ' ' + c.key }))),
+      rep.fService, v => { rep.fService = v; renderReports(); }));
+    card.appendChild(rowF);
+
+    const rowC = el('div', 'hist-panel-row');
+    rowC.appendChild(histChip('не оплачено', rep.fUnpaid,
+      v => { rep.fUnpaid = v; renderReports(); }));
+    rowC.appendChild(histChip('не переданы показания', rep.fNoReadings,
+      v => { rep.fNoReadings = v; renderReports(); }));
+    card.appendChild(rowC);
+
+    if (rep.type === 'summary') card.appendChild(buildSummary());
+    else if (rep.type === 'compare') card.appendChild(buildCompare());
+    else card.appendChild(buildDetail());
+    return card;
+  }
+
+  function renderReports() {
+    const root = document.getElementById('reports-root');
+    if (!root) return;
+    repInit();
+    root.innerHTML = '';
+    root.appendChild(buildDefaultCard());
+    root.appendChild(buildConstructorCard());
+  }
+
   // ---------- Страница «Настройки» (информация) ----------
 
   function renderSettingsInfo() {
@@ -827,11 +1470,11 @@ const UI = (() => {
     root.appendChild(card);
 
     const card2 = el('div', 'info-card');
-    card2.appendChild(el('div', null, '🔧 Собрано: этапы 1–4 из 8'));
+    card2.appendChild(el('div', null, '🔧 Собрано: этапы 1–5 из 8'));
     card2.appendChild(el('div', 'muted',
-      'Дальше: отчёты (этап 5), архив (этап 6), тарифы/жильцы/импорт-экспорт (этап 7).'));
+      'Дальше: архив (этап 6), тарифы/жильцы/импорт-экспорт (этап 7), упаковка в EXE/APK (этап 8).'));
     root.appendChild(card2);
   }
 
-  return { el, toast, renderDashboard, renderHistory, renderSettingsInfo };
+  return { el, toast, renderDashboard, renderHistory, renderReports, renderSettingsInfo };
 })();

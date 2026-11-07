@@ -513,3 +513,78 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   100% { box-shadow: var(--shadow); }
 }
 .service.flash { animation: service-flash 1.6s ease; }
+
+/* ============================================================
+   Раздел «Отчёты» (этап 5)
+   ============================================================ */
+
+.rep-block {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.rep-title { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+.rep-note { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+.rep-result { margin-top: 6px; }
+.rep-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+  margin: 4px 0 10px;
+}
+.rep-side-title {
+  font-weight: 700;
+  font-size: 14px;
+  align-self: center;
+  min-width: 76px;
+}
+
+/* Таблица отчёта: на телефоне прокручивается сама плашка,
+   страница остаётся без горизонтальной прокрутки */
+.rep-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+.rep-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.rep-table th, .rep-table td {
+  border: 1px solid var(--line);
+  padding: 7px 9px;
+  text-align: right;
+  white-space: nowrap;
+  background: var(--card);
+}
+.rep-table th:first-child, .rep-table td:first-child { text-align: left; }
+.rep-table th.rep-left, .rep-table td.rep-left { text-align: left; }
+.rep-table thead th { background: var(--panel); font-size: 12.5px; font-weight: 700; }
+.rep-table th.rep-group {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  text-align: center;
+}
+.rep-table td.rep-name { font-weight: 600; }
+.rep-table td.rep-num.none { color: var(--muted); font-weight: 400; }
+.rep-table tr.rep-total td { background: var(--panel); font-weight: 700; }
+.rep-table tr.rep-grand td {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-weight: 800;
+}
+.rep-table td.rep-badge-cell { white-space: normal; }
+.rep-pos { color: var(--green); }
+.rep-neg { color: var(--red); }
+
+.rep-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin: 1px 3px 1px 0;
+}
+.rep-badge.ok { background: #e5f1e6; color: var(--green); }
+.rep-badge.read { background: var(--accent-soft); color: var(--accent-dark); }
