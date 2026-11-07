@@ -174,7 +174,7 @@ const UI = (() => {
         Logic.prevReadings(Data.state.records, cfg.key, address, period.year, period.month));
       const curInp = numInput(rec ? rec.current_readings : null);
       const tariffInp = numInput(rec ? rec.tariff :
-        Logic.activeTariff(Data.state.records, cfg.key));
+        Logic.currentTariff(cfg.key, Data.state.records));
 
       const consRow = infoRow('Расход', '—');
       const debt = buildDebtBlock(
@@ -236,7 +236,7 @@ const UI = (() => {
     if (cfg.kind === 'trash') {
       const resInp = numInput(rec ? rec.residents_count : Logic.residentsFor(address));
       const tariffInp = numInput(rec ? rec.tariff :
-        Logic.activeTariff(Data.state.records, cfg.key));
+        Logic.currentTariff(cfg.key, Data.state.records));
       const debt = buildDebtBlock(
         rec ? rec.debt_advance :
         Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, period.month),
@@ -1847,18 +1847,23 @@ const UI = (() => {
     }
     root.appendChild(card0);
 
-    // ----- Тарифы -----
+    // ----- Тарифы (можно задать и здесь, и в карточке услуги) -----
     const card1 = el('div', 'info-card');
     card1.appendChild(el('div', null, '🏷️ Тарифы по услугам'));
     card1.appendChild(el('div', 'muted',
-      'Действующий тариф — последний введённый в карточке. ' +
-      'Он подтягивается в новые месяцы, пока его не изменить.'));
+      'Действующий тариф подтягивается в новые месяцы. ' +
+      'Задать или изменить его можно здесь или в самой карточке услуги. ' +
+      'Пустое поле — тариф снят (у мусора сумма = тариф × число жильцов).'));
+    const tarInputs = {};
     TARIFF_SERVICES.forEach(s => {
-      const active = Logic.activeTariff(Data.state.records, s.key);
+      const active = Logic.currentTariff(s.key, Data.state.records);
+      const inp = numInput(active);
+      inp.placeholder = 'не задан';
+      inp.classList.add('sett-input');
+      tarInputs[s.key] = inp;
       const row = el('div', 'sett-row');
       row.appendChild(el('div', 'sett-name', s.icon + ' ' + s.key));
-      row.appendChild(el('div', 'sett-val' + (active === null ? ' none' : ''),
-        active === null ? 'пока не задан' : Logic.fmtMoney(active)));
+      row.appendChild(inp);
       card1.appendChild(row);
 
       const hist = tariffHistory(s.key);
@@ -1875,6 +1880,21 @@ const UI = (() => {
         card1.appendChild(det);
       }
     });
+    const tarSave = el('button', 'btn btn-save', 'Сохранить тарифы');
+    tarSave.type = 'button';
+    tarSave.addEventListener('click', () => {
+      Object.keys(tarInputs).forEach(svc => {
+        const v = Logic.toNum(tarInputs[svc].value);
+        if (v === null) delete Data.state.tariffs[svc];
+        else Data.state.tariffs[svc] = v;
+      });
+      Data.persist();
+      toast('Тарифы сохранены');
+      renderSettingsInfo();
+    });
+    const tr1 = el('div', 'btn-row');
+    tr1.appendChild(tarSave);
+    card1.appendChild(tr1);
     root.appendChild(card1);
 
     // ----- Жильцы -----

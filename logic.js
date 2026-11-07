@@ -72,6 +72,15 @@ const Logic = (() => {
     return last ? toNum(last.tariff) : null;
   }
 
+  // Действующий тариф для новых месяцев: заданный в «Настройках»
+  // (state.tariffs), иначе последний введённый в карточках.
+  function currentTariff(service, records) {
+    const t = (Data.state && Data.state.tariffs) || {};
+    const v = t[service];
+    if (v !== undefined && v !== null && v !== '') return toNum(v);
+    return activeTariff(records, service);
+  }
+
   // Долг/аванс из прошлых записей (пока не стоит галочка «использован»).
   // Работает и для месяцев, и для годов: пустой месяц = null.
   function carryDebt(records, service, address, subservice, year, month) {
@@ -145,7 +154,7 @@ const Logic = (() => {
 
   return {
     MONTHS, periodNum, toNum, round2, fmtMoney, periodLabel,
-    prevReadings, activeTariff, carryDebt, residentsFor, lastPayment,
+    prevReadings, activeTariff, currentTariff, carryDebt, residentsFor, lastPayment,
     prevTaxPayment, calcAmount, calcTrashAmount, calcTaxTotal
   };
 })();

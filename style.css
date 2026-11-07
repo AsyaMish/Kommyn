@@ -703,6 +703,16 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sett-val.none { color: var(--muted); font-weight: 600; }
 .sett-label { font-weight: 600; font-size: 14px; margin-top: 16px; }
 
+/* Поле ввода тарифа/жильцов в строке настроек */
+.sett-input {
+  flex: 0 0 auto;
+  width: 150px;
+  min-height: 44px;
+  padding: 8px 12px;
+  text-align: right;
+  font-weight: 600;
+}
+
 .tar-details { margin: 2px 0 8px; }
 .tar-details summary {
   cursor: pointer;
