@@ -871,8 +871,8 @@ const UI = (() => {
   // ---------- Раздел «Отчёты» (этап 5) ----------
 
   const REP_METRICS = { fact: 'Факт оплаты', accrued: 'Начислено', debt: 'Долг/Аванс' };
-  const REP_BUCKETS = ['Рабочая 23', 'Рабочая 23А', 'none'];
-  const BUCKET_LABEL = { 'Рабочая 23': '23', 'Рабочая 23А': '23А', none: 'б/а' };
+  const REP_BUCKETS = ['Рабочая 23', 'Рабочая 23А'];
+  const BUCKET_LABEL = { 'Рабочая 23': '23', 'Рабочая 23А': '23А' };
   const MONTHS_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн',
                         'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
 
@@ -989,7 +989,7 @@ const UI = (() => {
   function repRecords(mode) {
     let list = Data.state.records.slice();
     if (rep.fService) list = list.filter(r => r.service === rep.fService);
-    if (rep.fAddress) list = list.filter(r => (r.address || 'none') === rep.fAddress);
+    if (rep.fAddress) list = list.filter(r => (r.address || '') === rep.fAddress);
     const kinds = repKinds();
     if (rep.fUnpaid || rep.fNoReadings) {
       list = list.filter(r =>
@@ -1009,7 +1009,7 @@ const UI = (() => {
     let s = null;
     records.forEach(r => {
       if (service !== null && r.service !== service) return;
-      if (bucket !== null && (r.address || 'none') !== bucket) return;
+      if (bucket !== null && (r.address || null) !== bucket) return;
       const v = recMetric(r, metric);
       if (v !== null) s = (s === null ? 0 : s) + v;
     });
@@ -1074,7 +1074,7 @@ const UI = (() => {
     const card = el('div', 'rep-block');
     card.appendChild(el('div', 'rep-title', '📊 Сравнение месяцев'));
     card.appendChild(el('div', 'rep-note',
-      'В ячейках — факт оплаты. «б/а» — без адреса (интернет, телевидение). ' +
+      'В ячейках — факт оплаты по каждому адресу. ' +
       'Годовые услуги попадают в месяц фактической оплаты.'));
 
     const row = el('div', 'hist-panel-row');
@@ -1096,14 +1096,14 @@ const UI = (() => {
     const rows = ['Газ', 'Вода', 'Свет', 'Мусор', 'Интернет'].concat(annualShown);
 
     const totals = {
-      prev: { 'Рабочая 23': null, 'Рабочая 23А': null, none: null },
-      cur: { 'Рабочая 23': null, 'Рабочая 23А': null, none: null }
+      prev: { 'Рабочая 23': null, 'Рабочая 23А': null },
+      cur: { 'Рабочая 23': null, 'Рабочая 23А': null }
     };
     function addTot(g, b, v) {
       if (v !== null) g[b] = Logic.round2((g[b] || 0) + v);
     }
 
-    const built = repTable(620);
+    const built = repTable(520);
     const thead = el('thead');
     const tr1 = el('tr');
     const thName = el('th', null, 'Услуга');
@@ -1111,10 +1111,10 @@ const UI = (() => {
     tr1.appendChild(thName);
     const thPrev = el('th', 'rep-group',
       'Предыдущий · ' + Logic.MONTHS[prev.m - 1] + ' ' + prev.y);
-    thPrev.colSpan = 3;
+    thPrev.colSpan = 2;
     const thCur = el('th', 'rep-group',
       'Текущий · ' + Logic.MONTHS[cur.m - 1] + ' ' + cur.y);
-    thCur.colSpan = 3;
+    thCur.colSpan = 2;
     tr1.appendChild(thPrev);
     tr1.appendChild(thCur);
     thead.appendChild(tr1);
@@ -1153,7 +1153,7 @@ const UI = (() => {
       const g = Logic.round2(REP_BUCKETS.reduce(
         (s, b) => s + (totals[key][b] || 0), 0));
       const td = moneyCell(g);
-      td.colSpan = 3;   // итог на всю ширину группы месяцев
+      td.colSpan = 2;   // итог на ширину группы адресов
       trG.appendChild(td);
     });
     tbody.appendChild(trG);
@@ -1241,7 +1241,7 @@ const UI = (() => {
       return box;
     }
 
-    const built = repTable(rep.ptype === 'year' ? 880 : 560);
+    const built = repTable(rep.ptype === 'year' ? 880 : 480);
     const thead = el('thead');
     const theadTr = el('tr');
     theadTr.appendChild(el('th', null, 'Услуга'));
@@ -1257,7 +1257,7 @@ const UI = (() => {
 
     const tbody = el('tbody');
     const grandMonths = new Array(12).fill(null);
-    const grandAddr = { 'Рабочая 23': null, 'Рабочая 23А': null, none: null, sum: null };
+    const grandAddr = { 'Рабочая 23': null, 'Рабочая 23А': null, sum: null };
 
     SERVICES.forEach(cfg => {
       const svcRecs = recs.filter(r => r.service === cfg.key);
@@ -1482,8 +1482,7 @@ const UI = (() => {
     rowF.appendChild(histSelect('Адрес', [
       { value: '', label: 'Все адреса' },
       { value: 'Рабочая 23', label: 'Рабочая 23' },
-      { value: 'Рабочая 23А', label: 'Рабочая 23А' },
-      { value: 'none', label: 'Без адреса' }
+      { value: 'Рабочая 23А', label: 'Рабочая 23А' }
     ], rep.fAddress, v => { rep.fAddress = v; renderReports(); }));
     rowF.appendChild(histSelect('Услуга',
       [{ value: '', label: 'Все услуги' }].concat(

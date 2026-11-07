@@ -37,13 +37,16 @@ const Data = (() => {
   };
 
   // Привести базу в порядок: добавить архив, привязать адреса услуг.
-  // Вызывается при каждом запуске, исправляет только то, что нужно.
+  // Вызывается при каждом запуске и после импорта, исправляет только то, что нужно.
   function normalize() {
     let changed = false;
     if (!state.archives) { state.archives = {}; changed = true; }
     const fix = r => {
-      const a = FIXED_ADDR[r.service];
-      if (a && !r.address) { r.address = a; changed = true; }
+      if (!r || r.address) return;
+      // Адрес есть у каждой записи: у ТВ/Интернета/Налогов — своя привязка,
+      // у остальных (счётчики, мусор) — основной дом.
+      r.address = FIXED_ADDR[r.service] || 'Рабочая 23';
+      changed = true;
     };
     state.records.forEach(fix);
     Object.keys(state.archives).forEach(y => (state.archives[y] || []).forEach(fix));
@@ -211,6 +214,7 @@ const Data = (() => {
       }
     });
     persist();
+    normalize();
     return n;
   }
 
@@ -250,6 +254,7 @@ const Data = (() => {
       }
     });
     if (added || updated) persist();
+    normalize();
     return { added: added, updated: updated };
   }
 
@@ -279,6 +284,7 @@ const Data = (() => {
     }
     state = fresh;
     persist();
+    normalize();
   }
 
   // Полный сброс: стереть всё и начать с чистого листа
