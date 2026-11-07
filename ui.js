@@ -555,6 +555,13 @@ const UI = (() => {
     selected: new Set()    // id записей, отмеченных галочками
   };
 
+  // Дата в привычном виде ДД.ММ.ГГГГ
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    const p = String(iso).split('-');
+    return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : iso;
+  }
+
   function histFiltered() {
     const kinds = {};
     SERVICES.forEach(c => { kinds[c.key] = c.kind; });
@@ -787,7 +794,7 @@ const UI = (() => {
 
       main.appendChild(el('div', 'hist-sub',
         Logic.periodLabel(rec.period_year, rec.period_month) +
-        ' · оплата ' + (rec.payment_date || '—')));
+        ' · оплата ' + fmtDate(rec.payment_date)));
       row.appendChild(main);
 
       const fact = Logic.toNum(rec.fact_payment);
