@@ -17,6 +17,7 @@ const Data = (() => {
     return {
       schema: 1,
       records: [],               // все записи учёта
+      archives: {},              // архив по годам: { '2025': [записи] }
       tariffs: {},               // действующие тарифы по услугам
       residents: {               // количество жильцов по адресам
         'Рабочая 23': 1,
@@ -26,6 +27,27 @@ const Data = (() => {
         launches: 0              // счётчик запусков (проверка хранилища)
       }
     };
+  }
+
+  // Услуги, которые автоматически ведутся по одному адресу
+  const FIXED_ADDR = {
+    'Телевидение': 'Рабочая 23',
+    'Интернет': 'Рабочая 23А',
+    'Налоги': 'Рабочая 23А'
+  };
+
+  // Привести базу в порядок: добавить архив, привязать адреса услуг.
+  // Вызывается при каждом запуске, исправляет только то, что нужно.
+  function normalize() {
+    let changed = false;
+    if (!state.archives) { state.archives = {}; changed = true; }
+    const fix = r => {
+      const a = FIXED_ADDR[r.service];
+      if (a && !r.address) { r.address = a; changed = true; }
+    };
+    state.records.forEach(fix);
+    Object.keys(state.archives).forEach(y => (state.archives[y] || []).forEach(fix));
+    if (changed) persist();
   }
 
   // Прочитать базу с устройства (или создать новую)
@@ -43,6 +65,7 @@ const Data = (() => {
       healthy = false;
       state = emptyState();
     }
+    normalize();
     return state;
   }
 
