@@ -64,6 +64,7 @@ const App = (() => {
     if (id === 'dashboard') UI.renderDashboard();
     if (id === 'history') UI.renderHistory();
     if (id === 'reports') UI.renderReports();
+    if (id === 'archive') UI.renderArchive();
     if (id === 'settings') UI.renderSettingsInfo();
     window.scrollTo(0, 0);
   }
@@ -86,12 +87,14 @@ const App = (() => {
 
   function start() {
     Data.init();
+    const archived = Data.autoArchive();   // записи старше года — в архив
     Data.state.prefs.launches = (Data.state.prefs.launches || 0) + 1;
     Data.persist();
     initPeriod();
     wireEvents();
     renderPeriod();
     showPage(pageFromHash());
+    if (archived > 0) UI.toast('В архив перемещено записей: ' + archived);
     console.log('Коммуналка: приложение запущено, запуск № ' + Data.state.prefs.launches);
   }
 
