@@ -122,7 +122,7 @@ const UI = (() => {
 
   // ---------- Окно подтверждения ----------
 
-  function confirmDialog(text, onYes) {
+  function confirmDialog(text, onYes, yesLabel) {
     const root = document.getElementById('modal-root');
     root.innerHTML = '';
     const overlay = el('div', 'modal-overlay');
@@ -134,7 +134,7 @@ const UI = (() => {
     no.type = 'button';
     no.addEventListener('click', () => { root.innerHTML = ''; });
 
-    const yes = el('button', 'btn btn-del', 'Удалить');
+    const yes = el('button', 'btn btn-del', yesLabel || 'Удалить');
     yes.type = 'button';
     yes.addEventListener('click', () => { root.innerHTML = ''; onYes(); });
 
@@ -743,14 +743,45 @@ const UI = (() => {
     if (hist.selected.size > 0) {
       const bar = el('div', 'hist-massbar');
       bar.appendChild(el('span', null, 'Выбрано: ' + hist.selected.size));
+      const nSel = hist.selected.size;
+
+      const arc = el('button', 'btn btn-ghost hist-mass-del', 'Архивировать');
+      arc.type = 'button';
+      arc.addEventListener('click', () => {
+        confirmDialog('Переместить выбранные записи (' + nSel + ') в архив?', () => {
+          Data.archiveRecords(Array.from(hist.selected));
+          hist.selected.clear();
+          toast('В архив: ' + nSel);
+          renderHistory();
+        }, 'Архивировать');
+      });
+      bar.appendChild(arc);
+
+      const expCsv = el('button', 'btn btn-ghost hist-mass-del', 'Выгрузить CSV');
+      expCsv.type = 'button';
+      expCsv.addEventListener('click', () => {
+        const list = Data.state.records.filter(r => hist.selected.has(r.id));
+        Pack.download('kommyn-vygruzka.csv', '\ufeff' + Pack.toCSV(list));
+        toast('CSV скачан');
+      });
+      bar.appendChild(expCsv);
+
+      const expJson = el('button', 'btn btn-ghost hist-mass-del', 'Выгрузить JSON');
+      expJson.type = 'button';
+      expJson.addEventListener('click', () => {
+        const list = Data.state.records.filter(r => hist.selected.has(r.id));
+        Pack.download('kommyn-vygruzka.json', JSON.stringify(list, null, 2));
+        toast('JSON скачан');
+      });
+      bar.appendChild(expJson);
+
       const del = el('button', 'btn btn-del hist-mass-del', 'Удалить выбранные');
       del.type = 'button';
       del.addEventListener('click', () => {
-        confirmDialog('Вы хотите удалить выбранные записи (' + hist.selected.size + ')?', () => {
+        confirmDialog('Вы хотите удалить выбранные записи (' + nSel + ')?', () => {
           hist.selected.forEach(id => Data.removeRecord(id));
-          const n = hist.selected.size;
           hist.selected.clear();
-          toast('Удалено: ' + n);
+          toast('Удалено: ' + nSel);
           renderHistory();
         });
       });
@@ -1469,6 +1500,164 @@ const UI = (() => {
     root.appendChild(buildConstructorCard());
   }
 
+  // ---------- Раздел «Архив» (этап 6) ----------
+
+  // Сумма оплат по списку записей
+  function paySum(list) {
+    return list.reduce((s, r) => s + (Logic.toNum(r.fact_payment) || 0), 0);
+  }
+
+  function renderArchive() {
+    const root = document.getElementById('archive-root');
+    if (!root) return;
+    root.innerHTML = '';
+
+    // ----- Загрузка файла архива -----
+    const upCard = el('div', 'info-card');
+    upCard.appendChild(el('div', null, '📥 Загрузить архив'));
+    upCard.appendChild(el('div', 'muted',
+      'Файл ZIP (внутри JSON и/или CSV), JSON или CSV. ' +
+      'Каждая запись попадает в архив своего года — по дате оплаты.'));
+    const fileInp = el('input');
+    fileInp.type = 'file';
+    fileInp.accept = '.zip,.json,.csv';
+    fileInp.className = 'inp arch-file';
+    fileInp.addEventListener('change', async () => {
+      const f = fileInp.files && fileInp.files[0];
+      if (!f) return;
+      try {
+        let recs = [];
+        if (/\.zip$/i.test(f.name)) {
+          const entries = await Pack.readZip(await f.arrayBuffer());
+          const j = entries.find(e => /\.json$/i.test(e.name));
+          const c = entries.find(e => /\.csv$/i.test(e.name));
+          if (j) recs = JSON.parse(new TextDecoder().decode(j.data));
+          else if (c) recs = Pack.parseCSV(new TextDecoder().decode(c.data));
+          else toast('В ZIP нет файлов JSON или CSV');
+        } else if (/\.json$/i.test(f.name)) {
+          recs = JSON.parse(await f.text());
+        } else if (/\.csv$/i.test(f.name)) {
+          recs = Pack.parseCSV(await f.text());
+        } else {
+          toast('Поддерживаются файлы ZIP, JSON и CSV');
+        }
+        if (recs && !Array.isArray(recs) && Array.isArray(recs.records)) recs = recs.records;
+        if (Array.isArray(recs) && recs.length) {
+          const n = Data.addArchived(recs);
+          toast(n ? 'В архив добавлено записей: ' + n : 'Новых записей не найдено');
+        }
+      } catch (e) {
+        console.error(e);
+        toast('Не удалось прочитать файл');
+      }
+      fileInp.value = '';
+      renderArchive();
+    });
+    upCard.appendChild(fileInp);
+    root.appendChild(upCard);
+
+    const years = Object.keys(Data.state.archives || {}).sort().reverse();
+
+    if (!years.length) {
+      root.appendChild(el('div', 'placeholder-box',
+        'Архив пуст. Записи с датой оплаты старше года автоматически уходят сюда ' +
+        'при запуске приложения. Также можно архивировать выбранные записи в «Истории».'));
+      return;
+    }
+
+    years.forEach(y => {
+      const recs = Data.state.archives[y] || [];
+      const card = el('div', 'info-card');
+
+      const head = el('div', 'arch-year-head');
+      head.appendChild(el('div', 'arch-title',
+        '📅 ' + (y === 'без года' ? 'Без года' : y + ' год')));
+      head.appendChild(el('div', 'arch-meta',
+        'записей: ' + recs.length + ' · оплачено: ' + Logic.fmtMoney(paySum(recs))));
+      card.appendChild(head);
+
+      const btns = el('div', 'btn-row');
+
+      const zipBtn = el('button', 'btn btn-ghost', 'Скачать ZIP');
+      zipBtn.type = 'button';
+      zipBtn.addEventListener('click', () => {
+        const enc = new TextEncoder();
+        const blob = Pack.makeZip([
+          { name: 'kommyn-arhiv-' + y + '.json',
+            data: enc.encode(JSON.stringify(recs, null, 2)) },
+          { name: 'kommyn-arhiv-' + y + '.csv',
+            data: enc.encode('\ufeff' + Pack.toCSV(recs)) }
+        ]);
+        Pack.download('kommyn-arhiv-' + y + '.zip', blob);
+        toast('Архив ' + y + ' скачан');
+      });
+      btns.appendChild(zipBtn);
+
+      const backAll = el('button', 'btn btn-ghost', 'Вернуть всё в историю');
+      backAll.type = 'button';
+      backAll.addEventListener('click', () => {
+        confirmDialog('Вернуть все записи ' + y + ' года в историю?', () => {
+          const n = recs.length;
+          Data.restoreRecords(recs.map(r => r.id));
+          toast('Возвращено записей: ' + n);
+          renderArchive();
+        }, 'Вернуть');
+      });
+      btns.appendChild(backAll);
+      card.appendChild(btns);
+
+      // ----- Разбивка по месяцам -----
+      const byMonth = {};
+      recs.forEach(r => {
+        const m = r.period_month || 0;   // 0 — годовые записи
+        (byMonth[m] = byMonth[m] || []).push(r);
+      });
+      Object.keys(byMonth).sort((a, b) => Number(a) - Number(b)).forEach(m => {
+        const list = byMonth[m];
+        const box = el('div', 'arch-month');
+
+        const mh = el('div', 'arch-month-head');
+        mh.appendChild(el('div', 'arch-month-title',
+          (Number(m) ? Logic.MONTHS[Number(m) - 1] : 'Годовые') +
+          ' · записей: ' + list.length + ' · ' + Logic.fmtMoney(paySum(list))));
+        const mb = el('button', 'btn btn-ghost arch-back', 'Вернуть месяц');
+        mb.type = 'button';
+        mb.addEventListener('click', () => {
+          confirmDialog('Вернуть эти записи в историю?', () => {
+            Data.restoreRecords(list.map(r => r.id));
+            toast('Возвращено записей: ' + list.length);
+            renderArchive();
+          }, 'Вернуть');
+        });
+        mh.appendChild(mb);
+        box.appendChild(mh);
+
+        list.forEach(rec => {
+          const cfg = SERVICES.find(c => c.key === rec.service);
+          const row = el('div', 'arch-row');
+          row.appendChild(el('span', 'hist-icon', cfg ? cfg.icon : '•'));
+          const main = el('div', 'arch-row-main');
+          main.appendChild(el('div', 'arch-row-title',
+            rec.service +
+            (rec.subservice ? ' · ' + rec.subservice : '') +
+            (rec.address ? ' · ' + rec.address : '')));
+          main.appendChild(el('div', 'arch-row-sub',
+            Logic.periodLabel(rec.period_year, rec.period_month) +
+            ' · оплата ' + fmtDate(rec.payment_date)));
+          row.appendChild(main);
+          const fact = Logic.toNum(rec.fact_payment);
+          row.appendChild(el('div', 'hist-amount' + (fact === null ? ' none' : ''),
+            Logic.fmtMoney(fact)));
+          box.appendChild(row);
+        });
+
+        card.appendChild(box);
+      });
+
+      root.appendChild(card);
+    });
+  }
+
   // ---------- Страница «Настройки» (информация) ----------
 
   function renderSettingsInfo() {
@@ -1489,11 +1678,12 @@ const UI = (() => {
     root.appendChild(card);
 
     const card2 = el('div', 'info-card');
-    card2.appendChild(el('div', null, '🔧 Собрано: этапы 1–5 из 8'));
+    card2.appendChild(el('div', null, '🔧 Собрано: этапы 1–6 из 8'));
     card2.appendChild(el('div', 'muted',
-      'Дальше: архив (этап 6), тарифы/жильцы/импорт-экспорт (этап 7), упаковка в EXE/APK (этап 8).'));
+      'Дальше: тарифы/жильцы/импорт-экспорт (этап 7), упаковка в EXE/APK (этап 8).'));
     root.appendChild(card2);
   }
 
-  return { el, toast, renderDashboard, renderHistory, renderReports, renderSettingsInfo };
+  return { el, toast, renderDashboard, renderHistory, renderReports,
+           renderArchive, renderSettingsInfo };
 })();
