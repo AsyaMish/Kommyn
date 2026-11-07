@@ -13,9 +13,14 @@ const UI = (() => {
     { key: 'Свет',       icon: '⚡', kind: 'readings', addresses: ['Рабочая 23', 'Рабочая 23А'] },
     { key: 'Мусор',      icon: '🗑️', kind: 'trash',    addresses: ['Рабочая 23', 'Рабочая 23А'] },
     { key: 'Интернет',   icon: '🌐', kind: 'internet', subservices: ['Мобильный', 'Домашний'] },
-    { key: 'Телевидение', icon: '📺', kind: 'later' },
-    { key: 'Налоги',     icon: '🧾', kind: 'later' }
+    { key: 'Телевидение', icon: '📺', kind: 'annual' },
+    { key: 'Налоги',     icon: '🧾', kind: 'taxes',    addresses: ['Рабочая 23А'] }
   ];
+
+  // Годовая услуга?
+  function isAnnual(cfg) {
+    return cfg.kind === 'annual' || cfg.kind === 'taxes';
+  }
 
   // ---------- Помощники ----------
 
@@ -93,6 +98,20 @@ const UI = (() => {
     return el('div', 'fhint', text);
   }
 
+  // Блок «Долг / Аванс» с галочкой (общий для всех услуг)
+  function buildDebtBlock(value, closed) {
+    const debtInp = numInput(value);
+    const debtCheck = checkRow('использован долг/аванс', closed);
+
+    const debtRow = el('div', 'frow');
+    debtRow.appendChild(el('div', 'flabel', 'Долг / Аванс'));
+    debtRow.appendChild(debtInp);
+    debtRow.appendChild(debtCheck);
+    debtRow.appendChild(hintRow('аванс — без минуса, долг — с минусом'));
+
+    return { debtInp, debtCheck, debtRow };
+  }
+
   // Подкраска «Долг / Аванс»: плюс — зелёный, минус — красный
   function paintDebt(inp) {
     const v = Logic.toNum(inp.value);
@@ -130,7 +149,9 @@ const UI = (() => {
 
   function renderCard(host, cfg, address, subservice) {
     const period = App.period;
-    const rec = Data.findRecord(cfg.key, address, subservice, period.year, period.month);
+    const annual = isAnnual(cfg);
+    const rec = Data.findRecord(cfg.key, address, subservice, period.year,
+      annual ? null : period.month);
     host.innerHTML = '';
 
     const card = el('div', 'card');
@@ -140,7 +161,7 @@ const UI = (() => {
     if (address) title += ' · ' + address;
     head.appendChild(el('div', 'card-title', title));
     head.appendChild(el('div', 'card-sub',
-      Logic.periodLabel(period.year, period.month) +
+      Logic.periodLabel(period.year, annual ? null : period.month) +
       (rec ? ' · запись сохранена' : ' · новая запись')));
     card.appendChild(head);
 
@@ -155,9 +176,10 @@ const UI = (() => {
         Logic.activeTariff(Data.state.records, cfg.key));
 
       const consRow = infoRow('Расход', '—');
-      const debtInp = numInput(rec ? rec.debt_advance :
-        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, period.month));
-      const debtCheck = checkRow('использован долг/аванс', rec ? rec.debt_advance_closed : false);
+      const debt = buildDebtBlock(
+        rec ? rec.debt_advance :
+        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, period.month),
+        rec ? rec.debt_advance_closed : false);
       const sumRow = infoRow('Сумма', '—', true);
       const factInp = numInput(rec ? rec.fact_payment : null);
       const payInp = dateInput(rec ? rec.payment_date : null);
@@ -172,28 +194,21 @@ const UI = (() => {
         const consumption = (p !== null && c !== null) ? Logic.round2(c - p) : null;
         consRow.querySelector('.fval').textContent =
           consumption === null ? '—' : String(consumption).replace('.', ',');
-        const amount = Logic.calcAmount(consumption, t, debtInp.value);
+        const amount = Logic.calcAmount(consumption, t, debt.debtInp.value);
         sumRow.querySelector('.fval').textContent = Logic.fmtMoney(amount);
         if (!factManual) factInp.value = amount === null ? '' : String(amount).replace('.', ',');
       }
 
       [prevInp, curInp, tariffInp].forEach(i => i.addEventListener('input', recalc));
-      debtInp.addEventListener('input', () => { paintDebt(debtInp); recalc(); });
+      debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
       factInp.addEventListener('input', () => { factManual = true; });
-      paintDebt(debtInp);
+      paintDebt(debt.debtInp);
 
       card.appendChild(fieldRow('Предыдущие показания', prevInp));
       card.appendChild(fieldRow('Текущие показания', curInp));
       card.appendChild(fieldRow('Тариф', tariffInp));
       card.appendChild(consRow);
-
-      const debtRow = el('div', 'frow');
-      debtRow.appendChild(el('div', 'flabel', 'Долг / Аванс'));
-      debtRow.appendChild(debtInp);
-      debtRow.appendChild(debtCheck);
-      debtRow.appendChild(hintRow('аванс — без минуса, долг — с минусом'));
-      card.appendChild(debtRow);
-
+      card.appendChild(debt.debtRow);
       card.appendChild(sumRow);
       card.appendChild(fieldRow('Факт оплаты', factInp));
       card.appendChild(fieldRow('Дата оплаты', payInp));
@@ -205,8 +220,8 @@ const UI = (() => {
         previous_readings: Logic.toNum(prevInp.value),
         current_readings: Logic.toNum(curInp.value),
         tariff: Logic.toNum(tariffInp.value),
-        debt_advance: Logic.toNum(debtInp.value),
-        debt_advance_closed: isChecked(debtCheck),
+        debt_advance: Logic.toNum(debt.debtInp.value),
+        debt_advance_closed: isChecked(debt.debtCheck),
         fact_payment: Logic.toNum(factInp.value),
         payment_date: payInp.value || null,
         readings_submitted_date: readInp.value || null,
@@ -221,36 +236,30 @@ const UI = (() => {
       const resInp = numInput(rec ? rec.residents_count : Logic.residentsFor(address));
       const tariffInp = numInput(rec ? rec.tariff :
         Logic.activeTariff(Data.state.records, cfg.key));
-      const debtInp = numInput(rec ? rec.debt_advance :
-        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, period.month));
-      const debtCheck = checkRow('использован долг/аванс', rec ? rec.debt_advance_closed : false);
+      const debt = buildDebtBlock(
+        rec ? rec.debt_advance :
+        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, period.month),
+        rec ? rec.debt_advance_closed : false);
       const sumRow = infoRow('Сумма', '—', true);
       const factInp = numInput(rec ? rec.fact_payment : null);
       const payInp = dateInput(rec ? rec.payment_date : null);
       const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
 
       function recalc() {
-        const amount = Logic.calcTrashAmount(resInp.value, tariffInp.value, debtInp.value);
+        const amount = Logic.calcTrashAmount(resInp.value, tariffInp.value, debt.debtInp.value);
         sumRow.querySelector('.fval').textContent = Logic.fmtMoney(amount);
         if (!factManual) factInp.value = amount === null ? '' : String(amount).replace('.', ',');
       }
 
       [resInp, tariffInp].forEach(i => i.addEventListener('input', recalc));
-      debtInp.addEventListener('input', () => { paintDebt(debtInp); recalc(); });
+      debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
       factInp.addEventListener('input', () => { factManual = true; });
-      paintDebt(debtInp);
+      paintDebt(debt.debtInp);
 
       card.appendChild(fieldRow('Количество жильцов', resInp));
       card.appendChild(fieldRow('Тариф', tariffInp));
       card.appendChild(sumRow);
-
-      const debtRow = el('div', 'frow');
-      debtRow.appendChild(el('div', 'flabel', 'Долг / Аванс'));
-      debtRow.appendChild(debtInp);
-      debtRow.appendChild(debtCheck);
-      debtRow.appendChild(hintRow('аванс — без минуса, долг — с минусом'));
-      card.appendChild(debtRow);
-
+      card.appendChild(debt.debtRow);
       card.appendChild(fieldRow('Факт оплаты', factInp));
       card.appendChild(fieldRow('Дата оплаты', payInp));
       card.appendChild(paidCheck);
@@ -258,8 +267,8 @@ const UI = (() => {
       addButtons(card, host, cfg, address, subservice, rec, () => ({
         residents_count: Logic.toNum(resInp.value),
         tariff: Logic.toNum(tariffInp.value),
-        debt_advance: Logic.toNum(debtInp.value),
-        debt_advance_closed: isChecked(debtCheck),
+        debt_advance: Logic.toNum(debt.debtInp.value),
+        debt_advance_closed: isChecked(debt.debtCheck),
         fact_payment: Logic.toNum(factInp.value),
         payment_date: payInp.value || null,
         flag_paid: isChecked(paidCheck)
@@ -275,34 +284,123 @@ const UI = (() => {
         : '—';
       card.appendChild(infoRow('Последняя оплата', lpText));
 
-      const debtInp = numInput(rec ? rec.debt_advance :
-        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, period.month));
-      const debtCheck = checkRow('использован долг/аванс', rec ? rec.debt_advance_closed : false);
+      const debt = buildDebtBlock(
+        rec ? rec.debt_advance :
+        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, period.month),
+        rec ? rec.debt_advance_closed : false);
       const factInp = numInput(rec ? rec.fact_payment : null);
       const payInp = dateInput(rec ? rec.payment_date : null);
       const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
 
-      debtInp.addEventListener('input', () => paintDebt(debtInp));
-      paintDebt(debtInp);
+      debt.debtInp.addEventListener('input', () => paintDebt(debt.debtInp));
+      paintDebt(debt.debtInp);
 
-      const debtRow = el('div', 'frow');
-      debtRow.appendChild(el('div', 'flabel', 'Долг / Аванс'));
-      debtRow.appendChild(debtInp);
-      debtRow.appendChild(debtCheck);
-      debtRow.appendChild(hintRow('аванс — без минуса, долг — с минусом'));
-      card.appendChild(debtRow);
-
+      card.appendChild(debt.debtRow);
       card.appendChild(fieldRow('Факт оплаты', factInp));
       card.appendChild(fieldRow('Дата оплаты', payInp));
       card.appendChild(paidCheck);
 
       addButtons(card, host, cfg, address, subservice, rec, () => ({
-        debt_advance: Logic.toNum(debtInp.value),
-        debt_advance_closed: isChecked(debtCheck),
+        debt_advance: Logic.toNum(debt.debtInp.value),
+        debt_advance_closed: isChecked(debt.debtCheck),
         fact_payment: Logic.toNum(factInp.value),
         payment_date: payInp.value || null,
         flag_paid: isChecked(paidCheck)
       }));
+    }
+
+    // ===== Телевидение (раз в год) =====
+    if (cfg.kind === 'annual') {
+      const lp = Logic.lastPayment(Data.state.records, cfg.key, null, period.year, null);
+      const lpText = lp
+        ? Logic.fmtMoney(lp.value) + ' · ' + Logic.periodLabel(lp.year, lp.month)
+        : '—';
+      card.appendChild(infoRow('Последняя оплата', lpText));
+
+      const debt = buildDebtBlock(
+        rec ? rec.debt_advance :
+        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, null),
+        rec ? rec.debt_advance_closed : false);
+      const factInp = numInput(rec ? rec.fact_payment : null);
+      const payInp = dateInput(rec ? rec.payment_date : null);
+      const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
+
+      debt.debtInp.addEventListener('input', () => paintDebt(debt.debtInp));
+      paintDebt(debt.debtInp);
+
+      card.appendChild(debt.debtRow);
+      card.appendChild(fieldRow('Факт оплаты', factInp));
+      card.appendChild(fieldRow('Дата оплаты', payInp));
+      card.appendChild(paidCheck);
+
+      addButtons(card, host, cfg, address, subservice, rec, () => ({
+        debt_advance: Logic.toNum(debt.debtInp.value),
+        debt_advance_closed: isChecked(debt.debtCheck),
+        fact_payment: Logic.toNum(factInp.value),
+        payment_date: payInp.value || null,
+        flag_paid: isChecked(paidCheck)
+      }));
+    }
+
+    // ===== Налоги (раз в год, только 23А) =====
+    if (cfg.kind === 'taxes') {
+      const houseInp = numInput(rec ? rec.tax_house : null);
+      const landInp = numInput(rec ? rec.tax_land : null);
+      const carInp = numInput(rec ? rec.tax_car : null);
+      const totalRow = infoRow('Общая сумма налога', '—', true);
+
+      // Предыдущая оплата — строго за прошлый год (даже если там 0)
+      const prev = Logic.prevTaxPayment(Data.state.records, period.year);
+      const prevRow = el('div', 'frow');
+      prevRow.appendChild(el('div', 'flabel', 'Предыдущая оплата · ' + (period.year - 1)));
+      if (prev) {
+        prevRow.appendChild(el('div', 'fval', Logic.fmtMoney(prev.total)));
+        prevRow.appendChild(el('div', 'fhint',
+          'дом ' + Logic.fmtMoney(prev.house) +
+          ' · земля ' + Logic.fmtMoney(prev.land) +
+          ' · машина ' + Logic.fmtMoney(prev.car)));
+      } else {
+        prevRow.appendChild(el('div', 'fval', '—'));
+      }
+
+      const debt = buildDebtBlock(
+        rec ? rec.debt_advance :
+        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, null),
+        rec ? rec.debt_advance_closed : false);
+      const factInp = numInput(rec ? rec.fact_payment : null);
+      const payInp = dateInput(rec ? rec.payment_date : null);
+      const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
+
+      function recalc() {
+        const total = Logic.calcTaxTotal(houseInp.value, landInp.value, carInp.value);
+        totalRow.querySelector('.fval').textContent = Logic.fmtMoney(total);
+      }
+
+      [houseInp, landInp, carInp].forEach(i => i.addEventListener('input', recalc));
+      debt.debtInp.addEventListener('input', () => paintDebt(debt.debtInp));
+      paintDebt(debt.debtInp);
+
+      card.appendChild(fieldRow('Дом', houseInp));
+      card.appendChild(fieldRow('Земля', landInp));
+      card.appendChild(fieldRow('Машина', carInp));
+      card.appendChild(totalRow);
+      card.appendChild(prevRow);
+      card.appendChild(debt.debtRow);
+      card.appendChild(fieldRow('Факт оплаты', factInp));
+      card.appendChild(fieldRow('Дата оплаты', payInp));
+      card.appendChild(paidCheck);
+
+      addButtons(card, host, cfg, address, subservice, rec, () => ({
+        tax_house: Logic.toNum(houseInp.value),
+        tax_land: Logic.toNum(landInp.value),
+        tax_car: Logic.toNum(carInp.value),
+        debt_advance: Logic.toNum(debt.debtInp.value),
+        debt_advance_closed: isChecked(debt.debtCheck),
+        fact_payment: Logic.toNum(factInp.value),
+        payment_date: payInp.value || null,
+        flag_paid: isChecked(paidCheck)
+      }));
+      recalc();
     }
 
     host.appendChild(card);
@@ -311,6 +409,7 @@ const UI = (() => {
   // Кнопки «Сохранить» и «Удалить» внизу карточки
   function addButtons(card, host, cfg, address, subservice, rec, collect) {
     const period = App.period;
+    const annual = isAnnual(cfg);
     const row = el('div', 'btn-row');
 
     const save = el('button', 'btn btn-save', 'Сохранить');
@@ -322,8 +421,8 @@ const UI = (() => {
         address: address || null,
         subservice: subservice || null,
         period_year: period.year,
-        period_month: period.month,
-        record_type: 'monthly',
+        period_month: annual ? null : period.month,
+        record_type: annual ? 'annual' : 'monthly',
         previous_readings: null,
         current_readings: null,
         tariff: null,
@@ -375,9 +474,16 @@ const UI = (() => {
     body.innerHTML = '';
 
     const options = cfg.addresses || cfg.subservices || [];
-    const tabs = el('div', 'addr-chips');
     const cardHost = el('div', 'card-host');
 
+    // Услуга без вкладок (Телевидение) — карточка сразу
+    if (!options.length) {
+      body.appendChild(cardHost);
+      renderCard(cardHost, cfg, null, null);
+      return;
+    }
+
+    const tabs = el('div', 'addr-chips');
     options.forEach(opt => {
       const chip = el('button', 'addr-chip', opt);
       chip.type = 'button';
@@ -393,7 +499,7 @@ const UI = (() => {
 
     body.appendChild(tabs);
     body.appendChild(cardHost);
-    if (options.length) tabs.children[0].click();   // сразу открыть первую вкладку
+    tabs.children[0].click();   // сразу открыть первую вкладку
   }
 
   function renderDashboard() {
@@ -401,11 +507,6 @@ const UI = (() => {
     SERVICES.forEach((cfg, i) => {
       const det = detailsList[i];
       if (!det) return;
-      if (cfg.kind === 'later') {
-        det.querySelector('.service-body').innerHTML =
-          '<div class="placeholder-box small">Карточка появится на этапе 3</div>';
-        return;
-      }
       if (det._onToggle) det.removeEventListener('toggle', det._onToggle);
       det._onToggle = function () { if (det.open) renderServiceBody(det, cfg); };
       det.addEventListener('toggle', det._onToggle);
@@ -433,7 +534,7 @@ const UI = (() => {
     root.appendChild(card);
 
     const card2 = el('div', 'info-card');
-    card2.appendChild(el('div', null, '🔧 Собрано: этапы 1–2 из 8'));
+    card2.appendChild(el('div', null, '🔧 Собрано: этапы 1–3 из 8'));
     card2.appendChild(el('div', 'muted',
       'Тарифы, жильцы, импорт/экспорт и сброс появятся на этапе 7.'));
     root.appendChild(card2);
