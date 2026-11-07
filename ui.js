@@ -569,6 +569,7 @@ const UI = (() => {
     fService: '',          // выбранная услуга ('' — все)
     fFrom: '',             // дата оплаты «с» (ГГГГ-ММ-ДД)
     fTo: '',               // дата оплаты «по»
+    fOpen: false,          // панель фильтров открыта (по умолчанию спрятана)
     selected: new Set()    // id записей, отмеченных галочками
   };
 
@@ -667,7 +668,27 @@ const UI = (() => {
     if (!root) return;
     root.innerHTML = '';
 
-    // ----- Панель фильтров -----
+    const list = histFiltered();
+    const filtersOn = hist.fUnpaid || hist.fNoReadings || hist.fAddress ||
+                      hist.fService || hist.fFrom || hist.fTo;
+
+    // ----- Счётчик записей и кнопка-шестерёнка -----
+    const toolbar = el('div', 'hist-toolbar');
+    toolbar.appendChild(el('div', 'hist-count',
+      'Записей: ' + list.length +
+      (list.length !== Data.state.records.length
+        ? ' из ' + Data.state.records.length : '')));
+
+    const gear = el('button', 'hist-gear' +
+      (hist.fOpen ? ' open' : '') +
+      (!hist.fOpen && filtersOn ? ' has-filters' : ''), '⚙️ Фильтры');
+    gear.type = 'button';
+    gear.title = hist.fOpen ? 'Скрыть фильтры' : 'Показать фильтры';
+    gear.addEventListener('click', () => { hist.fOpen = !hist.fOpen; renderHistory(); });
+    toolbar.appendChild(gear);
+    root.appendChild(toolbar);
+
+    // ----- Панель фильтров (открывается шестерёнкой) -----
     const panel = el('div', 'hist-panel');
 
     const row1 = el('div', 'hist-panel-row');
@@ -727,17 +748,7 @@ const UI = (() => {
     row3.appendChild(reset);
     panel.appendChild(row3);
 
-    root.appendChild(panel);
-
-    // ----- Список записей -----
-    const list = histFiltered();
-
-    const toolbar = el('div', 'hist-toolbar');
-    toolbar.appendChild(el('div', 'hist-count',
-      'Записей: ' + list.length +
-      (list.length !== Data.state.records.length
-        ? ' из ' + Data.state.records.length : '')));
-    root.appendChild(toolbar);
+    if (hist.fOpen) root.appendChild(panel);
 
     // Панель массовых действий
     if (hist.selected.size > 0) {
@@ -792,7 +803,9 @@ const UI = (() => {
     if (!list.length) {
       root.appendChild(el('div', 'placeholder-box',
         Data.state.records.length
-          ? 'Ничего не найдено — попробуйте изменить фильтры'
+          ? (filtersOn
+              ? 'Ничего не найдено — измените фильтры (кнопка «⚙️ Фильтры» сверху)'
+              : 'Записей пока нет. Заполните карточки на «Содержании» — они появятся здесь.')
           : 'Записей пока нет. Заполните карточки на «Содержании» — они появятся здесь.'));
       return;
     }
