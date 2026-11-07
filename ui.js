@@ -12,9 +12,10 @@ const UI = (() => {
     { key: 'Вода',       icon: '💧', kind: 'readings', addresses: ['Рабочая 23', 'Рабочая 23А'] },
     { key: 'Свет',       icon: '⚡', kind: 'readings', addresses: ['Рабочая 23', 'Рабочая 23А'] },
     { key: 'Мусор',      icon: '🗑️', kind: 'trash',    addresses: ['Рабочая 23', 'Рабочая 23А'] },
-    { key: 'Интернет',   icon: '🌐', kind: 'internet', subservices: ['Мобильный', 'Домашний'] },
-    { key: 'Телевидение', icon: '📺', kind: 'annual' },
-    { key: 'Налоги',     icon: '🧾', kind: 'taxes',    addresses: ['Рабочая 23А'] }
+    { key: 'Интернет',   icon: '🌐', kind: 'internet', subservices: ['Мобильный', 'Домашний'],
+      fixedAddress: 'Рабочая 23А' },
+    { key: 'Телевидение', icon: '📺', kind: 'annual', fixedAddress: 'Рабочая 23' },
+    { key: 'Налоги',     icon: '🧾', kind: 'taxes',   fixedAddress: 'Рабочая 23А' }
   ];
 
   // Годовая услуга?
@@ -477,6 +478,12 @@ const UI = (() => {
 
   // ---------- Экран «Содержание» ----------
 
+  // Плашка «услуга привязана к адресу»
+  function addrNote(address) {
+    return el('div', 'addr-note',
+      '📍 Услуга автоматически ведётся по адресу: ' + address);
+  }
+
   // Вкладки адресов/подпунктов + карточка.
   // preferred — какую вкладку выбрать (при открытии из истории);
   // без него сохраняем текущую выбранную вкладку.
@@ -486,13 +493,22 @@ const UI = (() => {
     const prevText = prevSel ? prevSel.textContent : null;
     body.innerHTML = '';
 
-    const options = cfg.addresses || cfg.subservices || [];
     const cardHost = el('div', 'card-host');
 
-    // Услуга без вкладок (Телевидение) — карточка сразу
+    // Услуга, привязанная к одному адресу без вкладок (ТВ → 23, Налоги → 23А)
+    if (cfg.fixedAddress && !cfg.subservices) {
+      body.appendChild(addrNote(cfg.fixedAddress));
+      body.appendChild(cardHost);
+      renderCard(cardHost, cfg, cfg.fixedAddress, null);
+      return;
+    }
+
+    const options = cfg.addresses || cfg.subservices || [];
+
+    // Услуга без вкладок — карточка сразу
     if (!options.length) {
       body.appendChild(cardHost);
-      renderCard(cardHost, cfg, null, null);
+      renderCard(cardHost, cfg, cfg.fixedAddress || null, null);
       return;
     }
 
@@ -504,12 +520,13 @@ const UI = (() => {
         tabs.querySelectorAll('.addr-chip').forEach(c => c.classList.remove('sel'));
         chip.classList.add('sel');
         renderCard(cardHost, cfg,
-          cfg.addresses ? opt : null,
+          cfg.fixedAddress || (cfg.addresses ? opt : null),
           cfg.subservices ? opt : null);
       });
       tabs.appendChild(chip);
     });
 
+    if (cfg.fixedAddress) body.appendChild(addrNote(cfg.fixedAddress));
     body.appendChild(tabs);
     body.appendChild(cardHost);
 
