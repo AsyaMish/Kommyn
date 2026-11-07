@@ -1091,7 +1091,9 @@ const UI = (() => {
     ['prev', 'cur'].forEach(key => {
       const g = Logic.round2(REP_BUCKETS.reduce(
         (s, b) => s + (totals[key][b] || 0), 0));
-      trG.appendChild(moneyCell(g));
+      const td = moneyCell(g);
+      td.colSpan = 3;   // итог на всю ширину группы месяцев
+      trG.appendChild(td);
     });
     tbody.appendChild(trG);
 
