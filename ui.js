@@ -374,10 +374,19 @@ const UI = (() => {
       function recalc() {
         const total = Logic.calcTaxTotal(houseInp.value, landInp.value, carInp.value);
         totalRow.querySelector('.fval').textContent = Logic.fmtMoney(total);
+
+        // «Факт оплаты» подтягивается сам: общая сумма − долг/аванс,
+        // пока пользователь не впишет туда своё значение
+        const d = Logic.toNum(debt.debtInp.value);
+        const amount = total === null ? null : Logic.round2(total - (d === null ? 0 : d));
+        if (!factManual) {
+          factInp.value = amount === null ? '' : String(amount).replace('.', ',');
+        }
       }
 
       [houseInp, landInp, carInp].forEach(i => i.addEventListener('input', recalc));
-      debt.debtInp.addEventListener('input', () => paintDebt(debt.debtInp));
+      debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
+      factInp.addEventListener('input', () => { factManual = true; });
       paintDebt(debt.debtInp);
 
       card.appendChild(fieldRow('Дом', houseInp));
