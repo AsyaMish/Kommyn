@@ -116,9 +116,108 @@ const Data = (() => {
     persist();
   }
 
+  // ---------- Архив ----------
+
+  // Граница автоархивации: сегодня минус один год (ГГГГ-ММ-ДД)
+  function archiveCutoff() {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 1);
+    return d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0');
+  }
+
+  // Год архива для записи: по дате оплаты, иначе по периоду
+  function yearOf(r) {
+    const y = String(r.payment_date || '').slice(0, 4);
+    if (/^\d{4}$/.test(y)) return y;
+    if (r.period_year) return String(r.period_year);
+    return 'без года';
+  }
+
+  // Автоархивация: записи с датой оплаты старше 1 года — в архив своего года.
+  // Возвращает количество перемещённых записей.
+  function autoArchive() {
+    const cutoff = archiveCutoff();
+    const toMove = state.records.filter(r => r.payment_date && r.payment_date < cutoff);
+    if (!toMove.length) return 0;
+    toMove.forEach(r => {
+      const y = yearOf(r);
+      if (!state.archives[y]) state.archives[y] = [];
+      state.archives[y].push(r);
+    });
+    const ids = new Set(toMove.map(r => r.id));
+    state.records = state.records.filter(r => !ids.has(r.id));
+    persist();
+    return toMove.length;
+  }
+
+  // Переместить выбранные записи (по id) в архив своего года
+  function archiveRecords(ids) {
+    const set = new Set(ids || []);
+    const moved = [];
+    state.records = state.records.filter(r => {
+      if (set.has(r.id)) { moved.push(r); return false; }
+      return true;
+    });
+    moved.forEach(r => {
+      const y = yearOf(r);
+      if (!state.archives[y]) state.archives[y] = [];
+      state.archives[y].push(r);
+    });
+    persist();
+    return moved.length;
+  }
+
+  // Вернуть записи из архива в историю (по id).
+  // Год, который опустел, удаляется.
+  function restoreRecords(ids) {
+    const set = new Set(ids || []);
+    Object.keys(state.archives).forEach(y => {
+      const back = [], keep = [];
+      state.archives[y].forEach(r => (set.has(r.id) ? back : keep).push(r));
+      if (back.length) {
+        state.records.push(...back);
+        state.archives[y] = keep;
+      }
+    });
+    Object.keys(state.archives).forEach(y => {
+      if (!state.archives[y].length) delete state.archives[y];
+    });
+    persist();
+  }
+
+  // Добавить записи из файла в архив своего года.
+  // Совпадение по уникальному ключу — остаётся более свежая запись.
+  function addArchived(records) {
+    let n = 0;
+    (records || []).forEach(rec => {
+      if (!rec || !rec.service) return;
+      const rec2 = Object.assign({}, rec);
+      if (!rec2.id) rec2.id = uid();
+      if (!rec2.technical_date) rec2.technical_date = new Date().toISOString();
+      const y = yearOf(rec2);
+      if (!state.archives[y]) state.archives[y] = [];
+      const twin = state.archives[y].find(r =>
+        r.service === rec2.service &&
+        (r.address || null) === (rec2.address || null) &&
+        (r.subservice || null) === (rec2.subservice || null) &&
+        r.period_year === rec2.period_year &&
+        (r.period_month || null) === (rec2.period_month || null));
+      if (!twin) { state.archives[y].push(rec2); n++; }
+      else if (String(rec2.technical_date || '') > String(twin.technical_date || '')) {
+        Object.assign(twin, rec2);
+        n++;
+      }
+    });
+    persist();
+    return n;
+  }
+
   return {
     init, persist, uid, isHealthy,
     findRecord, upsertRecord, removeRecord,
+    autoArchive, archiveRecords, restoreRecords, addArchived,
     get state() { return state; }
   };
 })();
