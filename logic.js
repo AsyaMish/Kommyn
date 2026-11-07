@@ -12,9 +12,10 @@ const Logic = (() => {
 
   // ---------- Помощники ----------
 
-  // Период одним числом (2026-11 → 24343), чтобы легко сравнивать
+  // Период одним числом (2026-11 → 24343), чтобы легко сравнивать.
+  // Годовая запись считается декабрём своего года.
   function periodNum(year, month) {
-    return year * 12 + (month || 12);   // годовая запись считается декабрём
+    return year * 12 + (month || 12);
   }
 
   // Строка → число (понимает запятую: «8,43»)
@@ -71,7 +72,8 @@ const Logic = (() => {
     return last ? toNum(last.tariff) : null;
   }
 
-  // Долг/аванс из прошлых записей (пока не стоит галочка «использован»)
+  // Долг/аванс из прошлых записей (пока не стоит галочка «использован»).
+  // Работает и для месяцев, и для годов: пустой месяц = null.
   function carryDebt(records, service, address, subservice, year, month) {
     const stream = sameStream(records, service, address, subservice)
       .filter(r => periodNum(r.period_year, r.period_month) < periodNum(year, month) &&
@@ -98,6 +100,24 @@ const Logic = (() => {
       : null;
   }
 
+  // Предыдущая оплата налогов: строго за прошлый год (даже если там 0)
+  function prevTaxPayment(records, year) {
+    const prev = records.find(r =>
+      r.service === 'Налоги' &&
+      r.period_year === year - 1 &&
+      r.record_type === 'annual') || null;
+    if (!prev) return null;
+    const house = toNum(prev.tax_house) || 0;
+    const land = toNum(prev.tax_land) || 0;
+    const car = toNum(prev.tax_car) || 0;
+    return {
+      house: toNum(prev.tax_house),
+      land: toNum(prev.tax_land),
+      car: toNum(prev.tax_car),
+      total: round2(house + land + car)
+    };
+  }
+
   // ---------- Расчёты ----------
 
   // Сумма = расход × тариф − аванс + долг (аванс — число без минуса)
@@ -116,9 +136,16 @@ const Logic = (() => {
     return round2(n * t - d);
   }
 
+  // Общая сумма налога = дом + земля + машина
+  function calcTaxTotal(house, land, car) {
+    const h = toNum(house), l = toNum(land), c = toNum(car);
+    if (h === null && l === null && c === null) return null;
+    return round2((h || 0) + (l || 0) + (c || 0));
+  }
+
   return {
     MONTHS, periodNum, toNum, round2, fmtMoney, periodLabel,
     prevReadings, activeTariff, carryDebt, residentsFor, lastPayment,
-    calcAmount, calcTrashAmount
+    prevTaxPayment, calcAmount, calcTrashAmount, calcTaxTotal
   };
 })();
