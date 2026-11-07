@@ -39,6 +39,12 @@ const App = (() => {
     UI.renderDashboard();   // карточки зависят от выбранного месяца
   }
 
+  // Поставить выбранный период (например, при открытии записи из истории)
+  function setPeriod(year, month) {
+    period = { year: year, month: month };
+    renderPeriod();
+  }
+
   // ----- Переключение разделов -----
 
   function pageFromHash() {
@@ -56,6 +62,7 @@ const App = (() => {
     const title = document.getElementById('page-title');
     if (title) title.textContent = TITLES[id] || '';
     if (id === 'dashboard') UI.renderDashboard();
+    if (id === 'history') UI.renderHistory();
     if (id === 'settings') UI.renderSettingsInfo();
     window.scrollTo(0, 0);
   }
@@ -89,5 +96,8 @@ const App = (() => {
 
   document.addEventListener('DOMContentLoaded', start);
 
-  return { get period() { return period; } };
+  return {
+    get period() { return period; },
+    setPeriod, showPage
+  };
 })();

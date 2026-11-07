@@ -477,9 +477,13 @@ const UI = (() => {
 
   // ---------- Экран «Содержание» ----------
 
-  // Вкладки адресов/подпунктов + карточка
-  function renderServiceBody(det, cfg) {
+  // Вкладки адресов/подпунктов + карточка.
+  // preferred — какую вкладку выбрать (при открытии из истории);
+  // без него сохраняем текущую выбранную вкладку.
+  function renderServiceBody(det, cfg, preferred) {
     const body = det.querySelector('.service-body');
+    const prevSel = body.querySelector('.addr-chip.sel');
+    const prevText = prevSel ? prevSel.textContent : null;
     body.innerHTML = '';
 
     const options = cfg.addresses || cfg.subservices || [];
@@ -508,7 +512,17 @@ const UI = (() => {
 
     body.appendChild(tabs);
     body.appendChild(cardHost);
+
     tabs.children[0].click();   // сразу открыть первую вкладку
+    if (preferred) {
+      tabs.querySelectorAll('.addr-chip').forEach(ch => {
+        if (ch.textContent === preferred) ch.click();
+      });
+    } else if (prevText) {
+      tabs.querySelectorAll('.addr-chip').forEach(ch => {
+        if (ch.textContent === prevText) ch.click();
+      });
+    }
   }
 
   function renderDashboard() {
@@ -517,10 +531,273 @@ const UI = (() => {
       const det = detailsList[i];
       if (!det) return;
       if (det._onToggle) det.removeEventListener('toggle', det._onToggle);
-      det._onToggle = function () { if (det.open) renderServiceBody(det, cfg); };
+      det._onToggle = function () {
+        if (!det.open) return;
+        renderServiceBody(det, cfg, det._preferred);
+        det._preferred = null;
+      };
       det.addEventListener('toggle', det._onToggle);
       if (det.open) renderServiceBody(det, cfg);
     });
+  }
+
+  // ---------- Раздел «История» (этап 4) ----------
+
+  // Состояние раздела — сохраняется, пока открыто приложение
+  const hist = {
+    sortDesc: true,        // true — сначала свежие
+    fUnpaid: false,        // фильтр «не оплачено»
+    fNoReadings: false,    // фильтр «не переданы показания»
+    fAddress: '',          // выбранный адрес ('' — все)
+    fService: '',          // выбранная услуга ('' — все)
+    fFrom: '',             // дата оплаты «с» (ГГГГ-ММ-ДД)
+    fTo: '',               // дата оплаты «по»
+    selected: new Set()    // id записей, отмеченных галочками
+  };
+
+  function histFiltered() {
+    const kinds = {};
+    SERVICES.forEach(c => { kinds[c.key] = c.kind; });
+
+    let list = Data.state.records.slice();
+
+    if (hist.fService) list = list.filter(r => r.service === hist.fService);
+    if (hist.fAddress) list = list.filter(r => (r.address || '') === hist.fAddress);
+
+    if (hist.fUnpaid || hist.fNoReadings) {
+      list = list.filter(r =>
+        (hist.fUnpaid && !r.flag_paid) ||
+        (hist.fNoReadings && kinds[r.service] === 'readings' &&
+          !r.flag_readings_submitted));
+    }
+
+    if (hist.fFrom) list = list.filter(r => r.payment_date && r.payment_date >= hist.fFrom);
+    if (hist.fTo) list = list.filter(r => r.payment_date && r.payment_date <= hist.fTo);
+
+    list.sort((a, b) =>
+      String(a.technical_date || '').localeCompare(String(b.technical_date || '')));
+    if (hist.sortDesc) list.reverse();
+
+    return list;
+  }
+
+  // Выпадающий список с подписью сверху
+  function histSelect(labelText, options, current, onChange) {
+    const sel = el('select', 'inp hist-select');
+    options.forEach(o => {
+      const opt = el('option', null, o.label);
+      opt.value = o.value;
+      sel.appendChild(opt);
+    });
+    sel.value = current;
+    sel.addEventListener('change', () => onChange(sel.value));
+    const wrap = el('label', 'hist-field');
+    wrap.appendChild(el('span', 'flabel', labelText));
+    wrap.appendChild(sel);
+    return wrap;
+  }
+
+  // Поле даты с подписью сверху
+  function histDate(labelText, value, onChange) {
+    const inp = el('input', 'inp');
+    inp.type = 'date';
+    inp.value = value;
+    inp.addEventListener('change', () => onChange(inp.value));
+    const wrap = el('label', 'hist-field');
+    wrap.appendChild(el('span', 'flabel', labelText));
+    wrap.appendChild(inp);
+    return wrap;
+  }
+
+  // Открыть запись из истории на «Содержании»: нужный месяц + нужная вкладка
+  function openRecord(rec) {
+    const idx = SERVICES.findIndex(s => s.key === rec.service);
+    if (idx < 0) return;
+    const cfg = SERVICES[idx];
+    const annual = isAnnual(cfg);
+    App.setPeriod(rec.period_year, annual ? (rec.period_month || 12) : (rec.period_month || 1));
+    if (location.hash !== '#dashboard') location.hash = 'dashboard';
+    App.showPage('dashboard');
+
+    const det = document.querySelectorAll('#page-dashboard .service')[idx];
+    if (!det) return;
+    const target = rec.address || rec.subservice || null;
+    const options = cfg.addresses || cfg.subservices || [];
+    const pref = (target && options.includes(target)) ? target : null;
+
+    if (det.open) {
+      renderServiceBody(det, cfg, pref);
+    } else {
+      det._preferred = pref;   // обработчик toggle отрисует с учётом вкладки
+      det.open = true;
+    }
+
+    det.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    det.classList.remove('flash');
+    void det.offsetWidth;      // перезапуск анимации подсветки
+    det.classList.add('flash');
+  }
+
+  function renderHistory() {
+    const root = document.getElementById('history-root');
+    if (!root) return;
+    root.innerHTML = '';
+
+    // ----- Панель фильтров -----
+    const panel = el('div', 'hist-panel');
+
+    const row1 = el('div', 'hist-panel-row');
+    const chUnpaid = el('label', 'hist-chip');
+    const bu = el('input'); bu.type = 'checkbox'; bu.checked = hist.fUnpaid;
+    bu.addEventListener('change', () => { hist.fUnpaid = bu.checked; renderHistory(); });
+    chUnpaid.appendChild(bu);
+    chUnpaid.appendChild(el('span', null, 'не оплачено'));
+
+    const chRead = el('label', 'hist-chip');
+    const br = el('input'); br.type = 'checkbox'; br.checked = hist.fNoReadings;
+    br.addEventListener('change', () => { hist.fNoReadings = br.checked; renderHistory(); });
+    chRead.appendChild(br);
+    chRead.appendChild(el('span', null, 'не переданы показания'));
+
+    row1.appendChild(chUnpaid);
+    row1.appendChild(chRead);
+    panel.appendChild(row1);
+
+    const row2 = el('div', 'hist-panel-row');
+    row2.appendChild(histSelect('Адрес', [
+      { value: '', label: 'Все адреса' },
+      { value: 'Рабочая 23', label: 'Рабочая 23' },
+      { value: 'Рабочая 23А', label: 'Рабочая 23А' }
+    ], hist.fAddress, v => { hist.fAddress = v; renderHistory(); }));
+
+    row2.appendChild(histSelect('Услуга',
+      [{ value: '', label: 'Все услуги' }].concat(
+        SERVICES.map(c => ({ value: c.key, label: c.icon + ' ' + c.key }))),
+      hist.fService, v => { hist.fService = v; renderHistory(); }));
+
+    row2.appendChild(histSelect('Сортировка', [
+      { value: 'new', label: 'Сначала свежие' },
+      { value: 'old', label: 'Сначала старые' }
+    ], hist.sortDesc ? 'new' : 'old',
+      v => { hist.sortDesc = v === 'new'; renderHistory(); }));
+
+    panel.appendChild(row2);
+
+    const row3 = el('div', 'hist-panel-row');
+    row3.appendChild(histDate('Оплата с', hist.fFrom,
+      v => { hist.fFrom = v; renderHistory(); }));
+    row3.appendChild(histDate('Оплата по', hist.fTo,
+      v => { hist.fTo = v; renderHistory(); }));
+
+    const reset = el('button', 'btn btn-ghost hist-reset', 'Сбросить');
+    reset.type = 'button';
+    reset.addEventListener('click', () => {
+      hist.fUnpaid = false;
+      hist.fNoReadings = false;
+      hist.fAddress = '';
+      hist.fService = '';
+      hist.fFrom = '';
+      hist.fTo = '';
+      renderHistory();
+    });
+    row3.appendChild(reset);
+    panel.appendChild(row3);
+
+    root.appendChild(panel);
+
+    // ----- Список записей -----
+    const list = histFiltered();
+
+    const toolbar = el('div', 'hist-toolbar');
+    toolbar.appendChild(el('div', 'hist-count',
+      'Записей: ' + list.length +
+      (list.length !== Data.state.records.length
+        ? ' из ' + Data.state.records.length : '')));
+    root.appendChild(toolbar);
+
+    // Панель массовых действий
+    if (hist.selected.size > 0) {
+      const bar = el('div', 'hist-massbar');
+      bar.appendChild(el('span', null, 'Выбрано: ' + hist.selected.size));
+      const del = el('button', 'btn btn-del hist-mass-del', 'Удалить выбранные');
+      del.type = 'button';
+      del.addEventListener('click', () => {
+        confirmDialog('Вы хотите удалить выбранные записи (' + hist.selected.size + ')?', () => {
+          hist.selected.forEach(id => Data.removeRecord(id));
+          const n = hist.selected.size;
+          hist.selected.clear();
+          toast('Удалено: ' + n);
+          renderHistory();
+        });
+      });
+      bar.appendChild(del);
+      root.appendChild(bar);
+    }
+
+    if (!list.length) {
+      root.appendChild(el('div', 'placeholder-box',
+        Data.state.records.length
+          ? 'Ничего не найдено — попробуйте изменить фильтры'
+          : 'Записей пока нет. Заполните карточки на «Содержании» — они появятся здесь.'));
+      return;
+    }
+
+    // «Выбрать все показанные»
+    const allIds = list.map(r => r.id);
+    const allSel = allIds.every(id => hist.selected.has(id));
+    const selRow = el('label', 'hist-selrow');
+    const sa = el('input'); sa.type = 'checkbox'; sa.checked = allSel;
+    sa.addEventListener('change', () => {
+      if (sa.checked) allIds.forEach(id => hist.selected.add(id));
+      else allIds.forEach(id => hist.selected.delete(id));
+      renderHistory();
+    });
+    selRow.appendChild(sa);
+    selRow.appendChild(el('span', null, 'Выбрать все показанные'));
+    root.appendChild(selRow);
+
+    const listBox = el('div', 'hist-list');
+    list.forEach(rec => {
+      const cfg = SERVICES.find(c => c.key === rec.service);
+      const icon = cfg ? cfg.icon : '•';
+      const row = el('div', 'hist-row');
+
+      const box = el('input');
+      box.type = 'checkbox';
+      box.checked = hist.selected.has(rec.id);
+      box.addEventListener('click', e => e.stopPropagation());
+      box.addEventListener('change', () => {
+        if (box.checked) hist.selected.add(rec.id);
+        else hist.selected.delete(rec.id);
+        renderHistory();
+      });
+      row.appendChild(box);
+
+      const main = el('div', 'hist-main');
+      const title = el('div', 'hist-title');
+      title.appendChild(el('span', 'hist-icon', icon));
+      title.appendChild(el('span', null, rec.service));
+      if (rec.address) title.appendChild(el('span', 'hist-tag', rec.address));
+      if (rec.subservice) title.appendChild(el('span', 'hist-tag', rec.subservice));
+      if (rec.flag_paid) title.appendChild(el('span', 'badge badge-ok', 'оплачено'));
+      if (cfg && cfg.kind === 'readings' && rec.flag_readings_submitted) {
+        title.appendChild(el('span', 'badge badge-read', 'показания'));
+      }
+      main.appendChild(title);
+
+      main.appendChild(el('div', 'hist-sub',
+        Logic.periodLabel(rec.period_year, rec.period_month) +
+        ' · оплата ' + (rec.payment_date || '—')));
+      row.appendChild(main);
+
+      const fact = Logic.toNum(rec.fact_payment);
+      row.appendChild(el('div', 'hist-amount' + (fact === null ? ' none' : ''),
+        Logic.fmtMoney(fact)));
+
+      row.addEventListener('click', () => openRecord(rec));
+      listBox.appendChild(row);
+    });
+    root.appendChild(listBox);
   }
 
   // ---------- Страница «Настройки» (информация) ----------
@@ -543,11 +820,11 @@ const UI = (() => {
     root.appendChild(card);
 
     const card2 = el('div', 'info-card');
-    card2.appendChild(el('div', null, '🔧 Собрано: этапы 1–3 из 8'));
+    card2.appendChild(el('div', null, '🔧 Собрано: этапы 1–4 из 8'));
     card2.appendChild(el('div', 'muted',
-      'Тарифы, жильцы, импорт/экспорт и сброс появятся на этапе 7.'));
+      'Дальше: отчёты (этап 5), архив (этап 6), тарифы/жильцы/импорт-экспорт (этап 7).'));
     root.appendChild(card2);
   }
 
-  return { el, toast, renderDashboard, renderSettingsInfo };
+  return { el, toast, renderDashboard, renderHistory, renderSettingsInfo };
 })();

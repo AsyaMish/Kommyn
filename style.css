@@ -394,3 +394,122 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 
 .noscript { padding: 20px; text-align: center; color: var(--red); }
+
+/* ============================================================
+   Раздел «История» (этап 4)
+   ============================================================ */
+
+.hist-panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.hist-panel-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.hist-field { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 150px; }
+.hist-select { min-height: 46px; padding: 10px 12px; }
+.hist-chip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--panel);
+  border-radius: var(--radius-s);
+  padding: 11px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.hist-chip input { width: 19px; height: 19px; accent-color: var(--accent); flex-shrink: 0; }
+.hist-chip:has(input:checked) { background: var(--accent-soft); color: var(--accent-dark); }
+.hist-reset { flex: 0 0 auto; min-height: 46px; padding: 10px 18px; }
+
+.hist-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.hist-count { font-size: 14px; color: var(--muted); font-weight: 600; }
+
+.hist-selrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--muted);
+  padding: 2px 2px 12px;
+  cursor: pointer;
+}
+.hist-selrow input { width: 19px; height: 19px; accent-color: var(--accent); }
+
+.hist-massbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-s);
+  padding: 10px 12px 10px 16px;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.hist-massbar span { flex: 1; }
+.hist-mass-del { flex: 0 0 auto; min-height: 44px; padding: 8px 16px; font-size: 14px; }
+
+.hist-list { display: flex; flex-direction: column; gap: 10px; }
+.hist-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.hist-row:hover { border-color: var(--accent); }
+.hist-row input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--accent); flex-shrink: 0; }
+.hist-main { flex: 1; min-width: 0; }
+.hist-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 15px;
+}
+.hist-icon { font-size: 17px; }
+.hist-tag {
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 2px 9px;
+}
+.hist-sub { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.hist-amount { font-weight: 700; font-size: 15px; white-space: nowrap; }
+.hist-amount.none { color: var(--muted); font-weight: 400; }
+
+.badge {
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.badge-ok { background: #e5f1e6; color: var(--green); }
+.badge-read { background: var(--accent-soft); color: var(--accent-dark); }
+
+/* Подсветка карточки, открытой из истории */
+@keyframes service-flash {
+  0% { box-shadow: 0 0 0 3px var(--accent); }
+  100% { box-shadow: var(--shadow); }
+}
+.service.flash { animation: service-flash 1.6s ease; }
