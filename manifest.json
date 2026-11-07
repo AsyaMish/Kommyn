@@ -1,0 +1,17 @@
+{
+  "name": "Коммуналка",
+  "short_name": "Коммуналка",
+  "description": "Учёт коммунальных платежей. Данные хранятся только на вашем устройстве.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#e07a3f",
+  "background_color": "#f6f4f1",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -76,6 +76,18 @@ const App = (() => {
 
   // ----- Запуск -----
 
+  // Служебный скрипт: приложение сохраняется на устройстве
+  // и открывается без интернета. Работает только по https
+  // (и на localhost) — на остальных адресах просто пропускается.
+  function registerSW() {
+    try {
+      if (!('serviceWorker' in navigator)) return;
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost') return;
+      navigator.serviceWorker.register('sw.js')
+        .catch(err => console.warn('Офлайн-режим недоступен.', err));
+    } catch (e) { /* без офлайн-режима приложение тоже работает */ }
+  }
+
   function wireEvents() {
     document.querySelectorAll('.nav-item').forEach(btn => {
       btn.addEventListener('click', () => navigate(btn.dataset.page));
@@ -92,6 +104,7 @@ const App = (() => {
     Data.persist();
     initPeriod();
     wireEvents();
+    registerSW();
     renderPeriod();
     showPage(pageFromHash());
     if (archived > 0) UI.toast('В архив перемещено записей: ' + archived);

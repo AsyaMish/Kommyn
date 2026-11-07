@@ -1991,12 +1991,40 @@ const UI = (() => {
     card5.appendChild(rr5);
     root.appendChild(card5);
 
-    // ----- Этапы -----
+    // ----- Установка на телефон/компьютер -----
     const card6 = el('div', 'info-card');
-    card6.appendChild(el('div', null, '🔧 Собрано: этапы 1–7 из 8'));
+    card6.appendChild(el('div', null, '📲 Как установить приложение'));
     card6.appendChild(el('div', 'muted',
-      'Дальше: упаковка в EXE/APK (этап 8).'));
+      'Приложение можно установить на телефон и компьютер: ' +
+      'появится иконка, откроется без адресной строки ' +
+      'и будет работать даже без интернета. Данные по-прежнему ' +
+      'хранятся только на устройстве.'));
+
+    const inst = [
+      ['🤖 Android (Chrome):',
+        'меню ⋮ → «Установить приложение» (или «Добавить на главный экран»).'],
+      ['🍎 iPhone (Safari):',
+        'кнопка «Поделиться» → «На экран „Домой"».'],
+      ['💻 Компьютер (Chrome, Edge):',
+        'значок ⊕ в правой части адресной строки → «Установить».'],
+      ['🔄 Обновление:',
+        'новая версия подгружается сама при первом запуске с интернетом.']
+    ];
+    inst.forEach(p => {
+      const row = el('div', 'inst-row');
+      row.appendChild(el('span', 'inst-name', p[0]));
+      row.appendChild(el('span', 'inst-text', p[1]));
+      card6.appendChild(row);
+    });
     root.appendChild(card6);
+
+    // ----- Итог -----
+    const card7 = el('div', 'info-card');
+    card7.appendChild(el('div', null, '🔧 Собрано: все 8 этапов — приложение готово'));
+    card7.appendChild(el('div', 'muted',
+      'Учёт по месяцам, история с фильтрами, отчёты, архив, ' +
+      'тарифы и жильцы, резервные копии и установка как приложение.'));
+    root.appendChild(card7);
   }
 
   return { el, toast, renderDashboard, renderHistory, renderReports,
