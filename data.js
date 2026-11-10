@@ -94,7 +94,32 @@ const Data = (() => {
 
   // ---------- Записи ----------
 
+  // Дата операции: дата оплаты, иначе дата показаний, иначе техническая.
+  // По ней определяется «последняя операция» месяца.
+  function opDate(r) {
+    return String(r.payment_date || r.readings_submitted_date ||
+      r.technical_date || '');
+  }
+
+  function byOpDate(a, b) {
+    return opDate(a).localeCompare(opDate(b)) ||
+      String(a.technical_date || '').localeCompare(String(b.technical_date || ''));
+  }
+
+  // Все записи одной «линии» (услуга + адрес + подпункт) за период.
+  // За один месяц может быть несколько записей. От старых к свежим.
+  function recordsFor(service, address, subservice, year, month) {
+    return state.records
+      .filter(r => r.service === service &&
+        (r.address || null) === (address || null) &&
+        (r.subservice || null) === (subservice || null) &&
+        r.period_year === year &&
+        (r.period_month || null) === (month || null))
+      .sort(byOpDate);
+  }
+
   // Найти запись по уникальному ключу: услуга + адрес + подпункт + период
+  // (возвращает первую; для всех записей месяца есть recordsFor)
   function findRecord(service, address, subservice, year, month) {
     return state.records.find(r =>
       r.service === service &&
@@ -190,8 +215,36 @@ const Data = (() => {
     persist();
   }
 
+  // Содержимое записи без служебных полей — для поиска точных дублей.
+  // За один месяц теперь может быть несколько записей, поэтому совпадение
+  // ищется и по id, и по ключу + содержимому.
+  const CONTENT_FIELDS = ['service', 'address', 'subservice',
+    'period_year', 'period_month', 'record_type',
+    'previous_readings', 'current_readings', 'tariff', 'residents_count',
+    'tax_house', 'tax_land', 'tax_car',
+    'debt_advance', 'debt_advance_closed',
+    'fact_payment', 'payment_date', 'readings_submitted_date',
+    'flag_readings_submitted', 'flag_paid', 'comment'];
+
+  function contentSignature(r) {
+    return CONTENT_FIELDS.map(f => (r[f] === undefined ? null : r[f])).join('|');
+  }
+
+  // Найти «двойника» в списке: та же запись (id) или то же содержимое
+  function findTwin(list, rec) {
+    if (rec.id) {
+      const byId = list.find(r => r.id === rec.id);
+      if (byId) return byId;
+    }
+    const sig = contentSignature(rec);
+    return list.find(r =>
+      sameKey(r, rec.service, rec.address, rec.subservice,
+        rec.period_year, rec.period_month) &&
+      contentSignature(r) === sig) || null;
+  }
+
   // Добавить записи из файла в архив своего года.
-  // Совпадение по уникальному ключу — остаётся более свежая запись.
+  // Совпадение по id или по ключу и содержимому — дубль не добавляется.
   function addArchived(records) {
     let n = 0;
     (records || []).forEach(rec => {
@@ -201,14 +254,10 @@ const Data = (() => {
       if (!rec2.technical_date) rec2.technical_date = new Date().toISOString();
       const y = yearOf(rec2);
       if (!state.archives[y]) state.archives[y] = [];
-      const twin = state.archives[y].find(r =>
-        r.service === rec2.service &&
-        (r.address || null) === (rec2.address || null) &&
-        (r.subservice || null) === (rec2.subservice || null) &&
-        r.period_year === rec2.period_year &&
-        (r.period_month || null) === (rec2.period_month || null));
+      const twin = findTwin(state.archives[y], rec2);
       if (!twin) { state.archives[y].push(rec2); n++; }
-      else if (String(rec2.technical_date || '') > String(twin.technical_date || '')) {
+      else if (twin.id === rec2.id &&
+               String(rec2.technical_date || '') > String(twin.technical_date || '')) {
         Object.assign(twin, rec2);
         n++;
       }
@@ -237,25 +286,27 @@ const Data = (() => {
     return rec2;
   }
 
-  // Умное слияние: записи из файла добавляются, а в совпавших
-  // (уникальный ключ) остаётся более свежая по technical_date.
+  // Умное слияние: записи из файла добавляются к базе.
+  // За месяц может быть несколько записей, поэтому совпадение ищется
+  // сначала по id, затем по ключу и содержимому (точный дубль — пропуск).
   function mergeRecords(incoming) {
-    let added = 0, updated = 0;
+    let added = 0, updated = 0, skipped = 0;
     (incoming || []).forEach(rec => {
       if (!rec || !rec.service) return;
       const rec2 = prepareImported(rec);
-      const i = state.records.findIndex(r =>
-        sameKey(r, rec2.service, rec2.address, rec2.subservice,
-          rec2.period_year, rec2.period_month));
-      if (i < 0) { state.records.push(rec2); added++; }
-      else if (String(rec2.technical_date || '') >
-               String(state.records[i].technical_date || '')) {
-        state.records[i] = rec2; updated++;
+      const twin = findTwin(state.records, rec2);
+      if (!twin) { state.records.push(rec2); added++; }
+      else if (twin.id === rec2.id &&
+               String(rec2.technical_date || '') >
+               String(twin.technical_date || '')) {
+        Object.assign(twin, rec2);
+        updated++;
       }
+      else skipped++;
     });
     if (added || updated) persist();
     normalize();
-    return { added: added, updated: updated };
+    return { added: added, updated: updated, skipped: skipped };
   }
 
   // Полная замена: база целиком становится такой, как в файле.
@@ -297,7 +348,7 @@ const Data = (() => {
 
   return {
     init, persist, uid, isHealthy,
-    findRecord, upsertRecord, removeRecord,
+    findRecord, recordsFor, upsertRecord, removeRecord,
     autoArchive, archiveRecords, restoreRecords, addArchived,
     mergeRecords, replaceAll, resetAll,
     get state() { return state; }

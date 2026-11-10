@@ -39,7 +39,16 @@ const Logic = (() => {
     return month ? MONTHS[month - 1] + ' ' + year : year + ' год';
   }
 
-  // Записи одной «линии» (та же услуга, адрес, подпункт), от старых к свежим
+  // Дата операции: дата оплаты, иначе дата показаний, иначе техническая.
+  // По ней определяется «последняя операция» месяца.
+  function opDate(r) {
+    return String(r.payment_date || r.readings_submitted_date ||
+      r.technical_date || '');
+  }
+
+  // Записи одной «линии» (та же услуга, адрес, подпункт), от старых к свежим.
+  // Внутри месяца порядок — по дате операции: так при нескольких
+  // записях за месяц «последней» становится запись с позднейшей датой.
   function sameStream(records, service, address, subservice) {
     return records
       .filter(r => r.service === service &&
@@ -47,6 +56,7 @@ const Logic = (() => {
         (r.subservice || null) === (subservice || null))
       .sort((a, b) =>
         periodNum(a.period_year, a.period_month) - periodNum(b.period_year, b.period_month) ||
+        opDate(a).localeCompare(opDate(b)) ||
         String(a.technical_date || '').localeCompare(String(b.technical_date || '')));
   }
 
@@ -109,12 +119,17 @@ const Logic = (() => {
       : null;
   }
 
-  // Предыдущая оплата налогов: строго за прошлый год (даже если там 0)
+  // Предыдущая оплата налогов: строго за прошлый год (даже если там 0).
+  // Если за год было несколько оплат — берётся последняя по дате.
   function prevTaxPayment(records, year) {
-    const prev = records.find(r =>
-      r.service === 'Налоги' &&
-      r.period_year === year - 1 &&
-      r.record_type === 'annual') || null;
+    const list = records
+      .filter(r =>
+        r.service === 'Налоги' &&
+        r.period_year === year - 1 &&
+        r.record_type === 'annual')
+      .sort((a, b) => opDate(a).localeCompare(opDate(b)) ||
+        String(a.technical_date || '').localeCompare(String(b.technical_date || '')));
+    const prev = list.length ? list[list.length - 1] : null;
     if (!prev) return null;
     const house = toNum(prev.tax_house) || 0;
     const land = toNum(prev.tax_land) || 0;

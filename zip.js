@@ -153,12 +153,12 @@ const Pack = (() => {
   // ----- CSV -----
 
   const CSV_FIELDS = [
-    'service', 'address', 'subservice', 'period_year', 'period_month', 'record_type',
+    'id', 'service', 'address', 'subservice', 'period_year', 'period_month', 'record_type',
     'previous_readings', 'current_readings', 'tariff', 'residents_count',
     'tax_house', 'tax_land', 'tax_car',
     'debt_advance', 'debt_advance_closed',
     'fact_payment', 'payment_date', 'readings_submitted_date',
-    'flag_readings_submitted', 'flag_paid', 'technical_date'
+    'flag_readings_submitted', 'flag_paid', 'comment', 'technical_date'
   ];
   const NUM_FIELDS = ['previous_readings', 'current_readings', 'tariff',
     'residents_count', 'tax_house', 'tax_land', 'tax_car',
@@ -222,6 +222,7 @@ const Pack = (() => {
         head.forEach((h, i) => { src[h] = (r[i] || '').trim(); });
 
         const out = {
+          id: src.id || null,
           service: src.service || '',
           address: src.address || null,
           subservice: src.subservice || null
@@ -244,6 +245,7 @@ const Pack = (() => {
         });
         out.payment_date = src.payment_date || null;
         out.readings_submitted_date = src.readings_submitted_date || null;
+        out.comment = src.comment || null;
         out.technical_date = src.technical_date || new Date().toISOString();
         return out;
       });

@@ -6,8 +6,8 @@
 'use strict';
 
 // Версия кэша. МЕНЯТЬ при обновлении файлов приложения
-// (index.html, style.css, *.js, иконок): kommynalka-v1 → kommynalka-v2.
-const CACHE = 'kommynalka-v1';
+// (index.html, style.css, *.js, иконок): kommynalka-v2 → kommynalka-v3.
+const CACHE = 'kommynalka-v2';
 
 const ASSETS = [
   './',

@@ -85,6 +85,16 @@ const App = (() => {
       if (location.protocol !== 'https:' && location.hostname !== 'localhost') return;
       navigator.serviceWorker.register('sw.js')
         .catch(err => console.warn('Офлайн-режим недоступен.', err));
+      // Когда установится новая версия приложения — перезагружаемся,
+      // чтобы обновление дошло с первого открытия
+      let hadController = !!navigator.serviceWorker.controller;
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController) { hadController = true; return; }   // первый запуск
+        if (reloading) return;
+        reloading = true;
+        location.reload();
+      });
     } catch (e) { /* без офлайн-режима приложение тоже работает */ }
   }
 
