@@ -85,16 +85,6 @@ const App = (() => {
       if (location.protocol !== 'https:' && location.hostname !== 'localhost') return;
       navigator.serviceWorker.register('sw.js')
         .catch(err => console.warn('Офлайн-режим недоступен.', err));
-      // Когда установится новая версия приложения — перезагружаемся,
-      // чтобы обновление дошло с первого открытия
-      let hadController = !!navigator.serviceWorker.controller;
-      let reloading = false;
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!hadController) { hadController = true; return; }   // первый запуск
-        if (reloading) return;
-        reloading = true;
-        location.reload();
-      });
     } catch (e) { /* без офлайн-режима приложение тоже работает */ }
   }
 
@@ -111,12 +101,13 @@ const App = (() => {
     Data.init();
     const archived = Data.autoArchive();   // записи старше года — в архив
     Data.state.prefs.launches = (Data.state.prefs.launches || 0) + 1;
-    Data.persist();
+    Data.persist(true);                    // счётчик запусков — не изменение данных
     initPeriod();
     wireEvents();
     registerSW();
     renderPeriod();
     showPage(pageFromHash());
+    UI.dropboxStartup();                   // сверить копию в Dropbox с местной
     if (archived > 0) UI.toast('В архив перемещено записей: ' + archived);
     console.log('Коммуналка: приложение запущено, запуск № ' + Data.state.prefs.launches);
   }

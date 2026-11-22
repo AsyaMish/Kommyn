@@ -15,6 +15,7 @@ const ASSETS = [
   './style.css',
   './data.js',
   './logic.js',
+  './dropbox.js',
   './ui.js',
   './app.js',
   './zip.js',

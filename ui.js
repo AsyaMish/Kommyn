@@ -148,28 +148,10 @@ const UI = (() => {
 
   // ---------- Карточка операции ----------
 
-  // Шапка блока записи
-  function recBlockHead(rec, ordinal) {
-    const head = el('div', 'rec-head');
-    if (rec) {
-      const paid = rec.payment_date ? fmtDate(rec.payment_date) : 'без даты';
-      const fact = Logic.toNum(rec.fact_payment);
-      head.appendChild(el('div', 'rec-title',
-        'Запись ' + ordinal + ' · оплата ' + paid +
-        (fact !== null ? ' · ' + Logic.fmtMoney(fact) : '')));
-    } else {
-      head.appendChild(el('div', 'rec-title', 'Новая запись'));
-      head.appendChild(el('div', 'rec-sub',
-        'Заполните и нажмите «Сохранить» — запись добавится сюда.'));
-    }
-    return head;
-  }
-
   function renderCard(host, cfg, address, subservice) {
     const period = App.period;
     const annual = isAnnual(cfg);
-    // Все записи этого месяца: за месяц может быть несколько
-    const recs = Data.recordsFor(cfg.key, address, subservice, period.year,
+    const rec = Data.findRecord(cfg.key, address, subservice, period.year,
       annual ? null : period.month);
     host.innerHTML = '';
 
@@ -181,385 +163,317 @@ const UI = (() => {
     head.appendChild(el('div', 'card-title', title));
     head.appendChild(el('div', 'card-sub',
       Logic.periodLabel(period.year, annual ? null : period.month) +
-      (recs.length ? ' · записей: ' + recs.length : ' · новая запись')));
+      (rec ? ' · запись сохранена' : ' · новая запись')));
+    card.appendChild(head);
 
-    const listHost = el('div', 'rec-list');
-    let ordinal = 0;
+    let factManual = false;   // пользователь сам правил «Факт оплаты»?
 
-    // Форма одной записи (существующей или новой)
-    function renderOne(rec) {
-      ordinal++;
-      const block = el('div', 'rec-block' + (rec ? '' : ' rec-draft'));
-      if (rec) block.dataset.recId = rec.id;
-      block.appendChild(recBlockHead(rec, ordinal));
+    // ===== Газ / Вода / Свет =====
+    if (cfg.kind === 'readings') {
+      const prevInp = numInput(rec ? rec.previous_readings :
+        Logic.prevReadings(Data.state.records, cfg.key, address, period.year, period.month));
+      const curInp = numInput(rec ? rec.current_readings : null);
+      const tariffInp = numInput(rec ? rec.tariff :
+        Logic.currentTariff(cfg.key, Data.state.records));
 
-      let factManual = false;   // пользователь сам правил «Факт оплаты»?
-      let collect = () => ({}); // собирается в своей ветке услуги
+      const consRow = infoRow('Расход', '—');
+      const debt = buildDebtBlock(
+        rec ? rec.debt_advance :
+        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, period.month),
+        rec ? rec.debt_advance_closed : false);
+      const sumRow = infoRow('Сумма', '—', true);
+      const factInp = numInput(rec ? rec.fact_payment : null);
+      const payInp = dateInput(rec ? rec.payment_date : null);
+      const readInp = dateInput(rec ? rec.readings_submitted_date : null);
+      const readCheck = checkRow('показания переданы', rec ? rec.flag_readings_submitted : false);
+      const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
 
-      // Комментарий — у каждой операции, выводится перед кнопками
-      const commentInp = el('textarea', 'inp comment-inp');
-      commentInp.rows = 3;
-      commentInp.placeholder = 'Комментарий к записи — необязательно';
-      commentInp.value = rec && rec.comment ? rec.comment : '';
-
-      // ===== Газ / Вода / Свет =====
-      if (cfg.kind === 'readings') {
-        // Новая запись: если за месяц уже есть операции — продолжаем
-        // от последней из них (её текущие показания), иначе — прошлые месяцы
-        let prevDefault = Logic.prevReadings(Data.state.records, cfg.key, address,
-          period.year, period.month);
-        if (rec) prevDefault = rec.previous_readings;
-        else {
-          for (let i = recs.length - 1; i >= 0; i--) {
-            const v = Logic.toNum(recs[i].current_readings);
-            if (v !== null) { prevDefault = v; break; }
-          }
-        }
-        // Долг/аванс подтягивается для первой записи месяца;
-        // у дополнительных записей поле пустое
-        const debtDefault = rec ? rec.debt_advance :
-          (recs.length ? null :
-            Logic.carryDebt(Data.state.records, cfg.key, address, subservice,
-              period.year, period.month));
-
-        const prevInp = numInput(prevDefault);
-        const curInp = numInput(rec ? rec.current_readings : null);
-        const tariffInp = numInput(rec ? rec.tariff :
-          Logic.currentTariff(cfg.key, Data.state.records));
-
-        const consRow = infoRow('Расход', '—');
-        const debt = buildDebtBlock(debtDefault,
-          rec ? rec.debt_advance_closed : false);
-        const sumRow = infoRow('Сумма', '—', true);
-        const factInp = numInput(rec ? rec.fact_payment : null);
-        const payInp = dateInput(rec ? rec.payment_date : null);
-        const readInp = dateInput(rec ? rec.readings_submitted_date : null);
-        const readCheck = checkRow('показания переданы',
-          rec ? rec.flag_readings_submitted : false);
-        const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
-
-        function recalc() {
-          const p = Logic.toNum(prevInp.value);
-          const c = Logic.toNum(curInp.value);
-          const t = Logic.toNum(tariffInp.value);
-          const consumption = (p !== null && c !== null) ? Logic.round2(c - p) : null;
-          consRow.querySelector('.fval').textContent =
-            consumption === null ? '—' : String(consumption).replace('.', ',');
-          const amount = Logic.calcAmount(consumption, t, debt.debtInp.value);
-          sumRow.querySelector('.fval').textContent = Logic.fmtMoney(amount);
-          if (!factManual) factInp.value = amount === null ? '' : String(amount).replace('.', ',');
-        }
-
-        [prevInp, curInp, tariffInp].forEach(i => i.addEventListener('input', recalc));
-        debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
-        factInp.addEventListener('input', () => { factManual = true; });
-        paintDebt(debt.debtInp);
-
-        block.appendChild(fieldRow('Предыдущие показания', prevInp));
-        block.appendChild(fieldRow('Текущие показания', curInp));
-        block.appendChild(fieldRow('Тариф', tariffInp));
-        block.appendChild(consRow);
-        block.appendChild(debt.debtRow);
-        block.appendChild(sumRow);
-        block.appendChild(fieldRow('Факт оплаты', factInp));
-        block.appendChild(fieldRow('Дата оплаты', payInp));
-        block.appendChild(fieldRow('Дата передачи показаний', readInp));
-
-        // Две галочки в один ряд, каждая на половину ширины
-        const checksRow = el('div', 'check-row');
-        checksRow.appendChild(readCheck);
-        checksRow.appendChild(paidCheck);
-        block.appendChild(checksRow);
-
-        collect = () => ({
-          previous_readings: Logic.toNum(prevInp.value),
-          current_readings: Logic.toNum(curInp.value),
-          tariff: Logic.toNum(tariffInp.value),
-          debt_advance: Logic.toNum(debt.debtInp.value),
-          debt_advance_closed: isChecked(debt.debtCheck),
-          fact_payment: Logic.toNum(factInp.value),
-          payment_date: payInp.value || null,
-          readings_submitted_date: readInp.value || null,
-          flag_readings_submitted: isChecked(readCheck),
-          flag_paid: isChecked(paidCheck)
-        });
-        recalc();
+      function recalc() {
+        const p = Logic.toNum(prevInp.value);
+        const c = Logic.toNum(curInp.value);
+        const t = Logic.toNum(tariffInp.value);
+        const consumption = (p !== null && c !== null) ? Logic.round2(c - p) : null;
+        consRow.querySelector('.fval').textContent =
+          consumption === null ? '—' : String(consumption).replace('.', ',');
+        const amount = Logic.calcAmount(consumption, t, debt.debtInp.value);
+        sumRow.querySelector('.fval').textContent = Logic.fmtMoney(amount);
+        if (!factManual) factInp.value = amount === null ? '' : String(amount).replace('.', ',');
       }
 
-      // ===== Мусор =====
-      if (cfg.kind === 'trash') {
-        const resInp = numInput(rec ? rec.residents_count : Logic.residentsFor(address));
-        const tariffInp = numInput(rec ? rec.tariff :
-          Logic.currentTariff(cfg.key, Data.state.records));
-        const debtDefault = rec ? rec.debt_advance :
-          (recs.length ? null :
-            Logic.carryDebt(Data.state.records, cfg.key, address, subservice,
-              period.year, period.month));
-        const debt = buildDebtBlock(debtDefault,
-          rec ? rec.debt_advance_closed : false);
-        const sumRow = infoRow('Сумма', '—', true);
-        const factInp = numInput(rec ? rec.fact_payment : null);
-        const payInp = dateInput(rec ? rec.payment_date : null);
-        const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
+      [prevInp, curInp, tariffInp].forEach(i => i.addEventListener('input', recalc));
+      debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
+      factInp.addEventListener('input', () => { factManual = true; });
+      paintDebt(debt.debtInp);
 
-        function recalc() {
-          const amount = Logic.calcTrashAmount(resInp.value, tariffInp.value, debt.debtInp.value);
-          sumRow.querySelector('.fval').textContent = Logic.fmtMoney(amount);
-          if (!factManual) factInp.value = amount === null ? '' : String(amount).replace('.', ',');
-        }
+      card.appendChild(fieldRow('Предыдущие показания', prevInp));
+      card.appendChild(fieldRow('Текущие показания', curInp));
+      card.appendChild(fieldRow('Тариф', tariffInp));
+      card.appendChild(consRow);
+      card.appendChild(debt.debtRow);
+      card.appendChild(sumRow);
+      card.appendChild(fieldRow('Факт оплаты', factInp));
+      card.appendChild(fieldRow('Дата оплаты', payInp));
+      card.appendChild(fieldRow('Дата передачи показаний', readInp));
+      card.appendChild(readCheck);
+      card.appendChild(paidCheck);
 
-        [resInp, tariffInp].forEach(i => i.addEventListener('input', recalc));
-        debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
-        factInp.addEventListener('input', () => { factManual = true; });
-        paintDebt(debt.debtInp);
-
-        block.appendChild(fieldRow('Количество жильцов', resInp));
-        block.appendChild(fieldRow('Тариф', tariffInp));
-        block.appendChild(sumRow);
-        block.appendChild(debt.debtRow);
-        block.appendChild(fieldRow('Факт оплаты', factInp));
-        block.appendChild(fieldRow('Дата оплаты', payInp));
-        block.appendChild(paidCheck);
-
-        collect = () => ({
-          residents_count: Logic.toNum(resInp.value),
-          tariff: Logic.toNum(tariffInp.value),
-          debt_advance: Logic.toNum(debt.debtInp.value),
-          debt_advance_closed: isChecked(debt.debtCheck),
-          fact_payment: Logic.toNum(factInp.value),
-          payment_date: payInp.value || null,
-          flag_paid: isChecked(paidCheck)
-        });
-        recalc();
-      }
-
-      // ===== Интернет =====
-      if (cfg.kind === 'internet') {
-        const lp = Logic.lastPayment(Data.state.records, cfg.key, subservice, period.year, period.month);
-        const lpText = lp
-          ? Logic.fmtMoney(lp.value) + ' · ' + Logic.periodLabel(lp.year, lp.month)
-          : '—';
-        block.appendChild(infoRow('Последняя оплата', lpText));
-
-        const debtDefault = rec ? rec.debt_advance :
-          (recs.length ? null :
-            Logic.carryDebt(Data.state.records, cfg.key, address, subservice,
-              period.year, period.month));
-        const debt = buildDebtBlock(debtDefault,
-          rec ? rec.debt_advance_closed : false);
-        const factInp = numInput(rec ? rec.fact_payment : null);
-        const payInp = dateInput(rec ? rec.payment_date : null);
-        const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
-
-        debt.debtInp.addEventListener('input', () => paintDebt(debt.debtInp));
-        paintDebt(debt.debtInp);
-
-        block.appendChild(debt.debtRow);
-        block.appendChild(fieldRow('Факт оплаты', factInp));
-        block.appendChild(fieldRow('Дата оплаты', payInp));
-        block.appendChild(paidCheck);
-
-        collect = () => ({
-          debt_advance: Logic.toNum(debt.debtInp.value),
-          debt_advance_closed: isChecked(debt.debtCheck),
-          fact_payment: Logic.toNum(factInp.value),
-          payment_date: payInp.value || null,
-          flag_paid: isChecked(paidCheck)
-        });
-      }
-
-      // ===== Телевидение (раз в год) =====
-      if (cfg.kind === 'annual') {
-        const lp = Logic.lastPayment(Data.state.records, cfg.key, null, period.year, null);
-        const lpText = lp
-          ? Logic.fmtMoney(lp.value) + ' · ' + Logic.periodLabel(lp.year, lp.month)
-          : '—';
-        block.appendChild(infoRow('Последняя оплата', lpText));
-
-        const debtDefault = rec ? rec.debt_advance :
-          (recs.length ? null :
-            Logic.carryDebt(Data.state.records, cfg.key, address, subservice,
-              period.year, null));
-        const debt = buildDebtBlock(debtDefault,
-          rec ? rec.debt_advance_closed : false);
-        const factInp = numInput(rec ? rec.fact_payment : null);
-        const payInp = dateInput(rec ? rec.payment_date : null);
-        const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
-
-        debt.debtInp.addEventListener('input', () => paintDebt(debt.debtInp));
-        paintDebt(debt.debtInp);
-
-        block.appendChild(debt.debtRow);
-        block.appendChild(fieldRow('Факт оплаты', factInp));
-        block.appendChild(fieldRow('Дата оплаты', payInp));
-        block.appendChild(paidCheck);
-
-        collect = () => ({
-          debt_advance: Logic.toNum(debt.debtInp.value),
-          debt_advance_closed: isChecked(debt.debtCheck),
-          fact_payment: Logic.toNum(factInp.value),
-          payment_date: payInp.value || null,
-          flag_paid: isChecked(paidCheck)
-        });
-      }
-
-      // ===== Налоги (раз в год, только 23А) =====
-      if (cfg.kind === 'taxes') {
-        const houseInp = numInput(rec ? rec.tax_house : null);
-        const landInp = numInput(rec ? rec.tax_land : null);
-        const carInp = numInput(rec ? rec.tax_car : null);
-        const totalRow = infoRow('Общая сумма налога', '—', true);
-
-        // Предыдущая оплата — строго за прошлый год (даже если там 0);
-        // если за год было несколько оплат — последняя по дате
-        const prev = Logic.prevTaxPayment(Data.state.records, period.year);
-        const prevRow = el('div', 'frow');
-        prevRow.appendChild(el('div', 'flabel', 'Предыдущая оплата · ' + (period.year - 1)));
-        if (prev) {
-          prevRow.appendChild(el('div', 'fval', Logic.fmtMoney(prev.total)));
-          prevRow.appendChild(el('div', 'fhint',
-            'дом ' + Logic.fmtMoney(prev.house) +
-            ' · земля ' + Logic.fmtMoney(prev.land) +
-            ' · машина ' + Logic.fmtMoney(prev.car)));
-        } else {
-          prevRow.appendChild(el('div', 'fval', '—'));
-        }
-
-        const debtDefault = rec ? rec.debt_advance :
-          (recs.length ? null :
-            Logic.carryDebt(Data.state.records, cfg.key, address, subservice,
-              period.year, null));
-        const debt = buildDebtBlock(debtDefault,
-          rec ? rec.debt_advance_closed : false);
-        const factInp = numInput(rec ? rec.fact_payment : null);
-        const payInp = dateInput(rec ? rec.payment_date : null);
-        const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
-
-        function recalc() {
-          const total = Logic.calcTaxTotal(houseInp.value, landInp.value, carInp.value);
-          totalRow.querySelector('.fval').textContent = Logic.fmtMoney(total);
-
-          // «Факт оплаты» подтягивается сам: общая сумма − долг/аванс,
-          // пока пользователь не впишет туда своё значение
-          const d = Logic.toNum(debt.debtInp.value);
-          const amount = total === null ? null : Logic.round2(total - (d === null ? 0 : d));
-          if (!factManual) {
-            factInp.value = amount === null ? '' : String(amount).replace('.', ',');
-          }
-        }
-
-        [houseInp, landInp, carInp].forEach(i => i.addEventListener('input', recalc));
-        debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
-        factInp.addEventListener('input', () => { factManual = true; });
-        paintDebt(debt.debtInp);
-
-        block.appendChild(fieldRow('Дом', houseInp));
-        block.appendChild(fieldRow('Земля', landInp));
-        block.appendChild(fieldRow('Машина', carInp));
-        block.appendChild(totalRow);
-        block.appendChild(prevRow);
-        block.appendChild(debt.debtRow);
-        block.appendChild(fieldRow('Факт оплаты', factInp));
-        block.appendChild(fieldRow('Дата оплаты', payInp));
-        block.appendChild(paidCheck);
-
-        collect = () => ({
-          tax_house: Logic.toNum(houseInp.value),
-          tax_land: Logic.toNum(landInp.value),
-          tax_car: Logic.toNum(carInp.value),
-          debt_advance: Logic.toNum(debt.debtInp.value),
-          debt_advance_closed: isChecked(debt.debtCheck),
-          fact_payment: Logic.toNum(factInp.value),
-          payment_date: payInp.value || null,
-          flag_paid: isChecked(paidCheck)
-        });
-        recalc();
-      }
-
-      // ----- Комментарий (многострочный, перед кнопками) -----
-      block.appendChild(fieldRow('Комментарий', commentInp));
-
-      // ----- Кнопки блока -----
-      const btns = el('div', 'btn-row');
-
-      const save = el('button', 'btn btn-save', 'Сохранить');
-      save.type = 'button';
-      save.addEventListener('click', () => {
-        const record = Object.assign({
-          id: rec ? rec.id : Data.uid(),
-          service: cfg.key,
-          address: address || null,
-          subservice: subservice || null,
-          period_year: period.year,
-          period_month: annual ? null : period.month,
-          record_type: annual ? 'annual' : 'monthly',
-          previous_readings: null,
-          current_readings: null,
-          tariff: null,
-          residents_count: null,
-          tax_house: null, tax_land: null, tax_car: null,
-          debt_advance: null,
-          debt_advance_closed: false,
-          fact_payment: null,
-          payment_date: null,
-          readings_submitted_date: null,
-          flag_readings_submitted: false,
-          flag_paid: false,
-          comment: null,
-          technical_date: new Date().toISOString()
-        }, collect(), { comment: commentInp.value.trim() || null });
-
-        // Тариф и жильцы сохраняются как «действующие» для следующих месяцев
-        if (record.tariff !== null) Data.state.tariffs[record.service] = record.tariff;
-        if (record.residents_count !== null && record.address) {
-          Data.state.residents[record.address] = record.residents_count;
-        }
-
-        Data.upsertRecord(record);
-        toast('Сохранено');
-        renderCard(host, cfg, address, subservice);
-      });
-      btns.appendChild(save);
-
-      if (rec) {
-        const del = el('button', 'btn btn-del', 'Удалить');
-        del.type = 'button';
-        del.addEventListener('click', () => {
-          confirmDialog('Вы хотите удалить запись?', () => {
-            Data.removeRecord(rec.id);
-            toast('Запись удалена');
-            renderCard(host, cfg, address, subservice);
-          });
-        });
-        btns.appendChild(del);
-      } else {
-        const cancel = el('button', 'btn btn-ghost', 'Отменить');
-        cancel.type = 'button';
-        cancel.addEventListener('click', () => block.remove());
-        btns.appendChild(cancel);
-      }
-
-      block.appendChild(btns);
-      return block;
+      addButtons(card, host, cfg, address, subservice, rec, () => ({
+        previous_readings: Logic.toNum(prevInp.value),
+        current_readings: Logic.toNum(curInp.value),
+        tariff: Logic.toNum(tariffInp.value),
+        debt_advance: Logic.toNum(debt.debtInp.value),
+        debt_advance_closed: isChecked(debt.debtCheck),
+        fact_payment: Logic.toNum(factInp.value),
+        payment_date: payInp.value || null,
+        readings_submitted_date: readInp.value || null,
+        flag_readings_submitted: isChecked(readCheck),
+        flag_paid: isChecked(paidCheck)
+      }));
+      recalc();
     }
 
-    // Существующие записи месяца + форма для новой, если записей ещё нет
-    recs.forEach(r => listHost.appendChild(renderOne(r)));
-    if (!recs.length) listHost.appendChild(renderOne(null));
+    // ===== Мусор =====
+    if (cfg.kind === 'trash') {
+      const resInp = numInput(rec ? rec.residents_count : Logic.residentsFor(address));
+      const tariffInp = numInput(rec ? rec.tariff :
+        Logic.currentTariff(cfg.key, Data.state.records));
+      const debt = buildDebtBlock(
+        rec ? rec.debt_advance :
+        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, period.month),
+        rec ? rec.debt_advance_closed : false);
+      const sumRow = infoRow('Сумма', '—', true);
+      const factInp = numInput(rec ? rec.fact_payment : null);
+      const payInp = dateInput(rec ? rec.payment_date : null);
+      const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
 
-    // Добавить ещё одну полноценную запись за этот месяц
-    const addBtn = el('button', 'btn btn-ghost add-rec-btn',
-      '＋ Добавить ещё запись за ' + (annual ? 'год' : 'месяц'));
-    addBtn.type = 'button';
-    addBtn.addEventListener('click', () => {
-      listHost.appendChild(renderOne(null));
-      addBtn.blur();
-    });
+      function recalc() {
+        const amount = Logic.calcTrashAmount(resInp.value, tariffInp.value, debt.debtInp.value);
+        sumRow.querySelector('.fval').textContent = Logic.fmtMoney(amount);
+        if (!factManual) factInp.value = amount === null ? '' : String(amount).replace('.', ',');
+      }
 
-    card.appendChild(head);
-    card.appendChild(listHost);
-    card.appendChild(addBtn);
+      [resInp, tariffInp].forEach(i => i.addEventListener('input', recalc));
+      debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
+      factInp.addEventListener('input', () => { factManual = true; });
+      paintDebt(debt.debtInp);
+
+      card.appendChild(fieldRow('Количество жильцов', resInp));
+      card.appendChild(fieldRow('Тариф', tariffInp));
+      card.appendChild(sumRow);
+      card.appendChild(debt.debtRow);
+      card.appendChild(fieldRow('Факт оплаты', factInp));
+      card.appendChild(fieldRow('Дата оплаты', payInp));
+      card.appendChild(paidCheck);
+
+      addButtons(card, host, cfg, address, subservice, rec, () => ({
+        residents_count: Logic.toNum(resInp.value),
+        tariff: Logic.toNum(tariffInp.value),
+        debt_advance: Logic.toNum(debt.debtInp.value),
+        debt_advance_closed: isChecked(debt.debtCheck),
+        fact_payment: Logic.toNum(factInp.value),
+        payment_date: payInp.value || null,
+        flag_paid: isChecked(paidCheck)
+      }));
+      recalc();
+    }
+
+    // ===== Интернет =====
+    if (cfg.kind === 'internet') {
+      const lp = Logic.lastPayment(Data.state.records, cfg.key, subservice, period.year, period.month);
+      const lpText = lp
+        ? Logic.fmtMoney(lp.value) + ' · ' + Logic.periodLabel(lp.year, lp.month)
+        : '—';
+      card.appendChild(infoRow('Последняя оплата', lpText));
+
+      const debt = buildDebtBlock(
+        rec ? rec.debt_advance :
+        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, period.month),
+        rec ? rec.debt_advance_closed : false);
+      const factInp = numInput(rec ? rec.fact_payment : null);
+      const payInp = dateInput(rec ? rec.payment_date : null);
+      const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
+
+      debt.debtInp.addEventListener('input', () => paintDebt(debt.debtInp));
+      paintDebt(debt.debtInp);
+
+      card.appendChild(debt.debtRow);
+      card.appendChild(fieldRow('Факт оплаты', factInp));
+      card.appendChild(fieldRow('Дата оплаты', payInp));
+      card.appendChild(paidCheck);
+
+      addButtons(card, host, cfg, address, subservice, rec, () => ({
+        debt_advance: Logic.toNum(debt.debtInp.value),
+        debt_advance_closed: isChecked(debt.debtCheck),
+        fact_payment: Logic.toNum(factInp.value),
+        payment_date: payInp.value || null,
+        flag_paid: isChecked(paidCheck)
+      }));
+    }
+
+    // ===== Телевидение (раз в год) =====
+    if (cfg.kind === 'annual') {
+      const lp = Logic.lastPayment(Data.state.records, cfg.key, null, period.year, null);
+      const lpText = lp
+        ? Logic.fmtMoney(lp.value) + ' · ' + Logic.periodLabel(lp.year, lp.month)
+        : '—';
+      card.appendChild(infoRow('Последняя оплата', lpText));
+
+      const debt = buildDebtBlock(
+        rec ? rec.debt_advance :
+        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, null),
+        rec ? rec.debt_advance_closed : false);
+      const factInp = numInput(rec ? rec.fact_payment : null);
+      const payInp = dateInput(rec ? rec.payment_date : null);
+      const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
+
+      debt.debtInp.addEventListener('input', () => paintDebt(debt.debtInp));
+      paintDebt(debt.debtInp);
+
+      card.appendChild(debt.debtRow);
+      card.appendChild(fieldRow('Факт оплаты', factInp));
+      card.appendChild(fieldRow('Дата оплаты', payInp));
+      card.appendChild(paidCheck);
+
+      addButtons(card, host, cfg, address, subservice, rec, () => ({
+        debt_advance: Logic.toNum(debt.debtInp.value),
+        debt_advance_closed: isChecked(debt.debtCheck),
+        fact_payment: Logic.toNum(factInp.value),
+        payment_date: payInp.value || null,
+        flag_paid: isChecked(paidCheck)
+      }));
+    }
+
+    // ===== Налоги (раз в год, только 23А) =====
+    if (cfg.kind === 'taxes') {
+      const houseInp = numInput(rec ? rec.tax_house : null);
+      const landInp = numInput(rec ? rec.tax_land : null);
+      const carInp = numInput(rec ? rec.tax_car : null);
+      const totalRow = infoRow('Общая сумма налога', '—', true);
+
+      // Предыдущая оплата — строго за прошлый год (даже если там 0)
+      const prev = Logic.prevTaxPayment(Data.state.records, period.year);
+      const prevRow = el('div', 'frow');
+      prevRow.appendChild(el('div', 'flabel', 'Предыдущая оплата · ' + (period.year - 1)));
+      if (prev) {
+        prevRow.appendChild(el('div', 'fval', Logic.fmtMoney(prev.total)));
+        prevRow.appendChild(el('div', 'fhint',
+          'дом ' + Logic.fmtMoney(prev.house) +
+          ' · земля ' + Logic.fmtMoney(prev.land) +
+          ' · машина ' + Logic.fmtMoney(prev.car)));
+      } else {
+        prevRow.appendChild(el('div', 'fval', '—'));
+      }
+
+      const debt = buildDebtBlock(
+        rec ? rec.debt_advance :
+        Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, null),
+        rec ? rec.debt_advance_closed : false);
+      const factInp = numInput(rec ? rec.fact_payment : null);
+      const payInp = dateInput(rec ? rec.payment_date : null);
+      const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
+
+      function recalc() {
+        const total = Logic.calcTaxTotal(houseInp.value, landInp.value, carInp.value);
+        totalRow.querySelector('.fval').textContent = Logic.fmtMoney(total);
+
+        // «Факт оплаты» подтягивается сам: общая сумма − долг/аванс,
+        // пока пользователь не впишет туда своё значение
+        const d = Logic.toNum(debt.debtInp.value);
+        const amount = total === null ? null : Logic.round2(total - (d === null ? 0 : d));
+        if (!factManual) {
+          factInp.value = amount === null ? '' : String(amount).replace('.', ',');
+        }
+      }
+
+      [houseInp, landInp, carInp].forEach(i => i.addEventListener('input', recalc));
+      debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
+      factInp.addEventListener('input', () => { factManual = true; });
+      paintDebt(debt.debtInp);
+
+      card.appendChild(fieldRow('Дом', houseInp));
+      card.appendChild(fieldRow('Земля', landInp));
+      card.appendChild(fieldRow('Машина', carInp));
+      card.appendChild(totalRow);
+      card.appendChild(prevRow);
+      card.appendChild(debt.debtRow);
+      card.appendChild(fieldRow('Факт оплаты', factInp));
+      card.appendChild(fieldRow('Дата оплаты', payInp));
+      card.appendChild(paidCheck);
+
+      addButtons(card, host, cfg, address, subservice, rec, () => ({
+        tax_house: Logic.toNum(houseInp.value),
+        tax_land: Logic.toNum(landInp.value),
+        tax_car: Logic.toNum(carInp.value),
+        debt_advance: Logic.toNum(debt.debtInp.value),
+        debt_advance_closed: isChecked(debt.debtCheck),
+        fact_payment: Logic.toNum(factInp.value),
+        payment_date: payInp.value || null,
+        flag_paid: isChecked(paidCheck)
+      }));
+      recalc();
+    }
+
     host.appendChild(card);
+  }
+
+  // Кнопки «Сохранить» и «Удалить» внизу карточки
+  function addButtons(card, host, cfg, address, subservice, rec, collect) {
+    const period = App.period;
+    const annual = isAnnual(cfg);
+    const row = el('div', 'btn-row');
+
+    const save = el('button', 'btn btn-save', 'Сохранить');
+    save.type = 'button';
+    save.addEventListener('click', () => {
+      const record = Object.assign({
+        id: rec ? rec.id : Data.uid(),
+        service: cfg.key,
+        address: address || null,
+        subservice: subservice || null,
+        period_year: period.year,
+        period_month: annual ? null : period.month,
+        record_type: annual ? 'annual' : 'monthly',
+        previous_readings: null,
+        current_readings: null,
+        tariff: null,
+        residents_count: null,
+        tax_house: null, tax_land: null, tax_car: null,
+        debt_advance: null,
+        debt_advance_closed: false,
+        fact_payment: null,
+        payment_date: null,
+        readings_submitted_date: null,
+        flag_readings_submitted: false,
+        flag_paid: false,
+        technical_date: new Date().toISOString()
+      }, collect());
+
+      // Тариф и жильцы сохраняются как «действующие» для следующих месяцев
+      if (record.tariff !== null) Data.state.tariffs[record.service] = record.tariff;
+      if (record.residents_count !== null && record.address) {
+        Data.state.residents[record.address] = record.residents_count;
+      }
+
+      Data.upsertRecord(record);
+      toast('Сохранено');
+      renderCard(host, cfg, address, subservice);
+    });
+    row.appendChild(save);
+
+    if (rec) {
+      const del = el('button', 'btn btn-del', 'Удалить');
+      del.type = 'button';
+      del.addEventListener('click', () => {
+        confirmDialog('Вы хотите удалить запись?', () => {
+          Data.removeRecord(rec.id);
+          toast('Запись удалена');
+          renderCard(host, cfg, address, subservice);
+        });
+      });
+      row.appendChild(del);
+    }
+
+    card.appendChild(row);
   }
 
   // ---------- Экран «Содержание» ----------
@@ -568,25 +482,6 @@ const UI = (() => {
   function addrNote(address) {
     return el('div', 'addr-note',
       '📍 Услуга автоматически ведётся по адресу: ' + address);
-  }
-
-  // Подсветить блок записи, открытой из истории (внутри карточки может
-  // быть несколько записей за месяц). Карточка может перерисоваться ещё
-  // раз (смена раздела через hash) — поэтому подсветка применяется
-  // с небольшой задержкой, к последней отрисовке.
-  function flashPreferred(det, body) {
-    if (!det._preferredRec) return;
-    const recId = det._preferredRec;
-    clearTimeout(det._flashTimer);
-    det._flashTimer = setTimeout(() => {
-      det._preferredRec = null;
-      const block = body.querySelector('.rec-block[data-rec-id="' + recId + '"]');
-      if (!block) return;
-      block.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      block.classList.remove('flash');
-      void block.offsetWidth;      // перезапуск анимации подсветки
-      block.classList.add('flash');
-    }, 150);
   }
 
   // Вкладки адресов/подпунктов + карточка.
@@ -605,7 +500,6 @@ const UI = (() => {
       body.appendChild(addrNote(cfg.fixedAddress));
       body.appendChild(cardHost);
       renderCard(cardHost, cfg, cfg.fixedAddress, null);
-      flashPreferred(det, body);
       return;
     }
 
@@ -615,7 +509,6 @@ const UI = (() => {
     if (!options.length) {
       body.appendChild(cardHost);
       renderCard(cardHost, cfg, cfg.fixedAddress || null, null);
-      flashPreferred(det, body);
       return;
     }
 
@@ -647,7 +540,6 @@ const UI = (() => {
         if (ch.textContent === prevText) ch.click();
       });
     }
-    flashPreferred(det, body);
   }
 
   function renderDashboard() {
@@ -758,7 +650,6 @@ const UI = (() => {
     const options = cfg.addresses || cfg.subservices || [];
     const pref = (target && options.includes(target)) ? target : null;
 
-    det._preferredRec = rec.id;   // блок этой записи подсветится после отрисовки
     if (det.open) {
       renderServiceBody(det, cfg, pref);
     } else {
@@ -965,9 +856,6 @@ const UI = (() => {
       main.appendChild(el('div', 'hist-sub',
         Logic.periodLabel(rec.period_year, rec.period_month) +
         ' · оплата ' + fmtDate(rec.payment_date)));
-      if (rec.comment) {
-        main.appendChild(el('div', 'hist-note', '💬 ' + rec.comment));
-      }
       row.appendChild(main);
 
       const fact = Logic.toNum(rec.fact_payment);
@@ -1498,12 +1386,12 @@ const UI = (() => {
       return box;
     }
 
-    const built = repTable(760);
+    const built = repTable(660);
     const thead = el('thead');
     const tr = el('tr');
-    ['Период', 'Услуга', 'Адрес', 'Факт', 'Начислено', 'Долг/аванс', 'Метки', 'Комментарий']
+    ['Период', 'Услуга', 'Адрес', 'Факт', 'Начислено', 'Долг/аванс', 'Метки']
       .forEach((h, i) => {
-        tr.appendChild(el('th', (i < 3 || i === 6 || i === 7) ? 'rep-left' : null, h));
+        tr.appendChild(el('th', (i < 3 || i === 6) ? 'rep-left' : null, h));
       });
     thead.appendChild(tr);
     built.t.appendChild(thead);
@@ -1540,8 +1428,6 @@ const UI = (() => {
       }
       if (!tdB.childNodes.length) tdB.textContent = '—';
       tr.appendChild(tdB);
-
-      tr.appendChild(el('td', 'rep-left rep-comment', r.comment || '—'));
       tbody.appendChild(tr);
     });
 
@@ -1552,7 +1438,6 @@ const UI = (() => {
     trT.appendChild(moneyCell(totFact));
     trT.appendChild(moneyCell(totAcc));
     trT.appendChild(debtCell(totDebt));
-    trT.appendChild(el('td', null, ''));
     trT.appendChild(el('td', null, ''));
     tbody.appendChild(trT);
 
@@ -1771,9 +1656,6 @@ const UI = (() => {
           main.appendChild(el('div', 'arch-row-sub',
             Logic.periodLabel(rec.period_year, rec.period_month) +
             ' · оплата ' + fmtDate(rec.payment_date)));
-          if (rec.comment) {
-            main.appendChild(el('div', 'arch-row-note', '💬 ' + rec.comment));
-          }
           row.appendChild(main);
           const fact = Logic.toNum(rec.fact_payment);
           row.appendChild(el('div', 'hist-amount' + (fact === null ? ' none' : ''),
@@ -1883,7 +1765,6 @@ const UI = (() => {
       arch = Data.addArchived(flat);
     }
     return 'Добавлено: ' + res.added + ' · Обновлено: ' + res.updated +
-      (res.skipped ? ' · Пропущено совпадений: ' + res.skipped : '') +
       (arch ? ' · В архив добавлено: ' + arch : '');
   }
 
@@ -1944,6 +1825,220 @@ const UI = (() => {
       }
       inp.value = '';
     });
+  }
+
+  // ---------- Синхронизация Dropbox ----------
+
+  // Дата-время в виде ДД.ММ.ГГГГ ЧЧ:ММ
+  function fmtWhen(iso) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const p = n => String(n).padStart(2, '0');
+    return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear() +
+      ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  // Строка о последней отправке копии
+  function pushText(lp) {
+    if (!lp) return 'В Dropbox ещё нет копии — отправьте её кнопкой ниже.';
+    return 'Копия отправлялась: ' + fmtWhen(lp.time) +
+      ' · записей: ' + lp.records + '.';
+  }
+
+  // Карточка «Синхронизация Dropbox» в Настройках
+  function renderDropboxCard(root) {
+    if (typeof DBX === 'undefined') return;
+    const st = DBX.status();
+    const card = el('div', 'info-card');
+    card.appendChild(el('div', null, '☁️ Синхронизация Dropbox'));
+    card.appendChild(el('div', 'muted',
+      'Копия всей базы хранится в вашем Dropbox (файл kommynalka.json). ' +
+      'После каждого изменения приложение само обновляет копию, ' +
+      'а при запуске на другом устройстве предлагает загрузить свежую. ' +
+      'Полная замена или сброс базы тоже попадут в Dropbox.'));
+
+    if (!st.connected) {
+      card.appendChild(el('div', 'sett-label', 'App Key приложения Dropbox'));
+      const keyInp = el('input', 'inp sett-input');
+      keyInp.placeholder = 'строка букв и цифр со страницы приложения Dropbox';
+      keyInp.value = st.appKey || '';
+      keyInp.autocomplete = 'off';
+      card.appendChild(keyInp);
+
+      const help = el('details', 'tar-details');
+      help.appendChild(el('summary', null, 'Как получить App Key (один раз)'));
+      help.appendChild(el('div', 'fhint',
+        '1. Открыть dropbox.com/developers/apps → «Create app».'));
+      help.appendChild(el('div', 'fhint',
+        '2. «Scoped access», тип доступа «App folder» → любое имя, например «Коммуналка».'));
+      help.appendChild(el('div', 'fhint',
+        '3. Вкладка Permissions: включить files.content.read, files.content.write, account_info.read → Submit.'));
+      help.appendChild(el('div', 'fhint',
+        '4. Вкладка Settings → Redirect URIs → добавить адрес этого сайта:'));
+      help.appendChild(el('div', 'fhint dbx-uri', st.redirectUri));
+      help.appendChild(el('div', 'fhint',
+        '5. Там же в Settings взять App key и вставить в поле выше. У «Мои финансы» свой Dropbox-коннект — для Коммуналки нужен свой App Key.'));
+      card.appendChild(help);
+
+      const connBtn = el('button', 'btn btn-save', '🔗 Подключить Dropbox');
+      connBtn.type = 'button';
+      connBtn.addEventListener('click', async () => {
+        DBX.setAppKey(keyInp.value);
+        if (!keyInp.value.trim()) {
+          toast('Сначала вставьте App Key', 3500);
+          return;
+        }
+        try {
+          await DBX.connect();
+        } catch (e) {
+          toast('Dropbox: ' + e.message, 4000);
+        }
+      });
+      const row0 = el('div', 'btn-row');
+      row0.appendChild(connBtn);
+      card.appendChild(row0);
+      root.appendChild(card);
+      return;
+    }
+
+    // ----- Подключено -----
+    const acc = st.account ?
+      ((st.account.name || '') + (st.account.email ? ' (' + st.account.email + ')' : '')) : '';
+    card.appendChild(el('div', 'dbx-status',
+      '✅ Подключено' + (acc ? ': ' + acc : '')));
+    const line = el('div', 'muted dbx-line', pushText(st.lastPush));
+    card.appendChild(line);
+
+    const auto = checkRow('автосохранение при изменениях', st.autoSync);
+    auto.querySelector('input').addEventListener('change', () => {
+      DBX.setAutoSync(isChecked(auto));
+      toast(isChecked(auto) ? 'Автосохранение включено' : 'Автосохранение выключено');
+    });
+    card.appendChild(auto);
+
+    // Отправить копию сейчас
+    const pushBtn = el('button', 'btn btn-ghost', '📤 Отправить в Dropbox');
+    pushBtn.type = 'button';
+    pushBtn.addEventListener('click', async () => {
+      pushBtn.disabled = true;
+      try {
+        const r = await DBX.push();
+        toast('Скопировано в Dropbox · записей: ' + r.records);
+      } catch (e) {
+        toast('Dropbox: ' + e.message, 5000);
+      }
+      renderSettingsInfo();
+    });
+
+    // Загрузить копию из Dropbox
+    card.appendChild(el('div', 'sett-label', 'Загрузить копию из Dropbox'));
+    const pullMode = el('select', 'inp');
+    [['merge', 'Умное слияние (рекомендуется)'],
+     ['replace', 'Полная замена базы']].forEach(o => {
+      const op = el('option', null, o[1]);
+      op.value = o[0];
+      pullMode.appendChild(op);
+    });
+    card.appendChild(pullMode);
+    const pullBtn = el('button', 'btn btn-ghost', '📥 Загрузить из Dropbox');
+    pullBtn.type = 'button';
+    pullBtn.addEventListener('click', async () => {
+      pullBtn.disabled = true;
+      try {
+        const data = await DBX.pull();
+        if (!data) {
+          toast('В Dropbox ещё нет копии', 3500);
+          renderSettingsInfo();
+          return;
+        }
+        const m = pullMode.value;
+        if (m === 'replace') {
+          confirmDialog(
+            'Полная замена: все текущие записи и архив будут стёрты ' +
+            'и заменены копией из Dropbox. Продолжить?', () => {
+              try {
+                toast(applyImport(data, 'replace'));
+                renderSettingsInfo();
+              } catch (e) {
+                console.error(e);
+                toast('Не удалось загрузить копию', 4000);
+              }
+            }, 'Заменить');
+        } else {
+          toast(applyImport(data, 'merge'));
+          renderSettingsInfo();
+        }
+      } catch (e) {
+        toast('Dropbox: ' + e.message, 5000);
+        renderSettingsInfo();
+      }
+    });
+
+    const row1 = el('div', 'btn-row');
+    row1.appendChild(pushBtn);
+    card.appendChild(row1);
+    const row2 = el('div', 'btn-row');
+    row2.appendChild(pullBtn);
+    card.appendChild(row2);
+    card.appendChild(el('div', 'fhint',
+      'Умное слияние: новые записи добавятся, в совпавших останутся более свежие. ' +
+      'Полная замена: текущая база будет стёрта и заменена копией.'));
+
+    // Отключить
+    const outBtn = el('button', 'btn btn-del', '✖ Отключить Dropbox');
+    outBtn.type = 'button';
+    outBtn.addEventListener('click', () => {
+      confirmDialog(
+        'Отключить Dropbox? Копия в Dropbox останется, ' +
+        'но автосохранение перестанет работать.', () => {
+          DBX.disconnect();
+          toast('Dropbox отключён');
+          renderSettingsInfo();
+        }, 'Отключить');
+    });
+    const row3 = el('div', 'btn-row');
+    row3.appendChild(outBtn);
+    card.appendChild(row3);
+
+    // Живые сведения о файле-копии (обновим строку, когда придут)
+    DBX.remoteInfo().then(m => {
+      if (!line.isConnected || !m || !m.server_modified) return;
+      line.textContent = pushText(st.lastPush) +
+        ' В Dropbox: ' + fmtWhen(m.server_modified) +
+        (m.size ? ' · ' + Math.max(1, Math.round(m.size / 1024)) + ' КБ' : '');
+    }).catch(() => {});
+
+    root.appendChild(card);
+  }
+
+  // При запуске приложения: сверить копию в Dropbox с местной.
+  // Копия свежее — предложить объединить; местная свежее — выложить её.
+  async function dropboxStartup() {
+    if (typeof DBX === 'undefined') return;
+    const s = await DBX.startup();
+    if (s.justConnected) {
+      toast('Dropbox подключён' + (s.account ? ': ' + s.account : ''), 4000);
+      if (s.pushed) toast('Копия базы отправлена в Dropbox', 3000);
+    } else if (s.pushed) {
+      toast('Скопировано в Dropbox', 2500);
+    }
+    if (s.error) { toast('Dropbox: ' + s.error, 5000); return; }
+    if (!s.newer) return;
+    confirmDialog(
+      'В Dropbox копия свежее — от ' + fmtWhen(s.newer.updated) +
+      ' (записей: ' + s.newer.records + '). ' +
+      'Загрузить её и объединить с текущей базой?', async () => {
+        try {
+          const data = await DBX.pull();
+          if (!data) { toast('В Dropbox ещё нет копии'); return; }
+          toast(applyImport(data, 'merge'), 3000);
+          const page = document.getElementById('page-settings');
+          if (page && page.classList.contains('active')) renderSettingsInfo();
+        } catch (e) {
+          console.error(e);
+          toast('Dropbox: ' + e.message, 5000);
+        }
+      }, 'Загрузить');
   }
 
   function renderSettingsInfo() {
@@ -2063,6 +2158,9 @@ const UI = (() => {
     buildImportBlock(card3, '.json', 'Загрузка из JSON-файла');
     root.appendChild(card3);
 
+    // ----- Синхронизация Dropbox -----
+    renderDropboxCard(root);
+
     // ----- CSV -----
     const card4 = el('div', 'info-card');
     card4.appendChild(el('div', null, '📄 Записи в CSV'));
@@ -2146,5 +2244,5 @@ const UI = (() => {
   }
 
   return { el, toast, renderDashboard, renderHistory, renderReports,
-           renderArchive, renderSettingsInfo };
+           renderArchive, renderSettingsInfo, dropboxStartup };
 })();
