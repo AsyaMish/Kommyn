@@ -148,11 +148,17 @@ const UI = (() => {
 
   // ---------- Карточка операции ----------
 
-  function renderCard(host, cfg, address, subservice) {
+  function renderCard(host, cfg, address, subservice, editId) {
     const period = App.period;
     const annual = isAnnual(cfg);
-    const rec = Data.findRecord(cfg.key, address, subservice, period.year,
+    const monthRecs = Data.findRecords(cfg.key, address, subservice, period.year,
       annual ? null : period.month);
+    // Какую запись редактируем: выбранную чипом, последнюю за месяц
+    // или новую (editId = 'new')
+    let rec = null;
+    if (editId === 'new') rec = null;
+    else if (editId) rec = monthRecs.find(r => r.id === editId) || null;
+    else rec = monthRecs.length ? monthRecs[monthRecs.length - 1] : null;
     host.innerHTML = '';
 
     const card = el('div', 'card');
@@ -163,15 +169,51 @@ const UI = (() => {
     head.appendChild(el('div', 'card-title', title));
     head.appendChild(el('div', 'card-sub',
       Logic.periodLabel(period.year, annual ? null : period.month) +
-      (rec ? ' · запись сохранена' : ' · новая запись')));
+      (rec
+        ? ' · запись ' + (monthRecs.indexOf(rec) + 1) + ' из ' + monthRecs.length
+        : (monthRecs.length
+          ? ' · новая запись (уже есть ' + monthRecs.length + ')'
+          : ' · новая запись'))));
     card.appendChild(head);
 
-    let factManual = false;   // пользователь сам правил «Факт оплаты»?
+    // Чипы записей месяца: переключение между записями и создание ещё одной
+    if (monthRecs.length) {
+      const strip = el('div', 'rec-strip');
+      monthRecs.forEach(r => {
+        const chip = el('button',
+          'rec-chip' + (rec && r.id === rec.id ? ' sel' : ''),
+          fmtDate(r.payment_date) + ' · ' +
+          Logic.fmtMoney(Logic.toNum(r.fact_payment)));
+        chip.type = 'button';
+        chip.addEventListener('click', () =>
+          renderCard(host, cfg, address, subservice, r.id));
+        strip.appendChild(chip);
+      });
+      const add = el('button', 'rec-chip rec-add', '＋ ещё запись');
+      add.type = 'button';
+      add.addEventListener('click', () =>
+        renderCard(host, cfg, address, subservice, 'new'));
+      strip.appendChild(add);
+      card.appendChild(strip);
+    }
+
+    // Пользователь сам правил «Факт оплаты» — сумма перестаёт
+    // пересчитываться (признак хранится в самой записи)
+    let factManual = rec ? !!rec.fact_manual : false;
 
     // ===== Газ / Вода / Свет =====
     if (cfg.kind === 'readings') {
-      const prevInp = numInput(rec ? rec.previous_readings :
-        Logic.prevReadings(Data.state.records, cfg.key, address, period.year, period.month));
+      // Новая запись в месяце, где показания уже вносились: «предыдущие» —
+      // самые большие текущие показания записей этого месяца
+      const prevAuto = (() => {
+        const cur = monthRecs
+          .map(r => Logic.toNum(r.current_readings))
+          .filter(v => v !== null);
+        if (cur.length) return Math.max.apply(null, cur);
+        return Logic.prevReadings(Data.state.records, cfg.key, address,
+          period.year, period.month);
+      })();
+      const prevInp = numInput(rec ? rec.previous_readings : prevAuto);
       const curInp = numInput(rec ? rec.current_readings : null);
       const tariffInp = numInput(rec ? rec.tariff :
         Logic.currentTariff(cfg.key, Data.state.records));
@@ -183,6 +225,8 @@ const UI = (() => {
         rec ? rec.debt_advance_closed : false);
       const sumRow = infoRow('Сумма', '—', true);
       const factInp = numInput(rec ? rec.fact_payment : null);
+      const factHint = hintRow('✍️ сумма введена вручную — не пересчитывается');
+      if (!factManual) factHint.style.display = 'none';
       const payInp = dateInput(rec ? rec.payment_date : null);
       const readInp = dateInput(rec ? rec.readings_submitted_date : null);
       const readCheck = checkRow('показания переданы', rec ? rec.flag_readings_submitted : false);
@@ -202,7 +246,10 @@ const UI = (() => {
 
       [prevInp, curInp, tariffInp].forEach(i => i.addEventListener('input', recalc));
       debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
-      factInp.addEventListener('input', () => { factManual = true; });
+      factInp.addEventListener('input', () => {
+        factManual = true;
+        factHint.style.display = '';
+      });
       paintDebt(debt.debtInp);
 
       card.appendChild(fieldRow('Предыдущие показания', prevInp));
@@ -212,6 +259,7 @@ const UI = (() => {
       card.appendChild(debt.debtRow);
       card.appendChild(sumRow);
       card.appendChild(fieldRow('Факт оплаты', factInp));
+      card.appendChild(factHint);
       card.appendChild(fieldRow('Дата оплаты', payInp));
       card.appendChild(fieldRow('Дата передачи показаний', readInp));
       card.appendChild(readCheck);
@@ -224,6 +272,7 @@ const UI = (() => {
         debt_advance: Logic.toNum(debt.debtInp.value),
         debt_advance_closed: isChecked(debt.debtCheck),
         fact_payment: Logic.toNum(factInp.value),
+        fact_manual: factManual,
         payment_date: payInp.value || null,
         readings_submitted_date: readInp.value || null,
         flag_readings_submitted: isChecked(readCheck),
@@ -243,6 +292,8 @@ const UI = (() => {
         rec ? rec.debt_advance_closed : false);
       const sumRow = infoRow('Сумма', '—', true);
       const factInp = numInput(rec ? rec.fact_payment : null);
+      const factHint = hintRow('✍️ сумма введена вручную — не пересчитывается');
+      if (!factManual) factHint.style.display = 'none';
       const payInp = dateInput(rec ? rec.payment_date : null);
       const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
 
@@ -254,7 +305,10 @@ const UI = (() => {
 
       [resInp, tariffInp].forEach(i => i.addEventListener('input', recalc));
       debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
-      factInp.addEventListener('input', () => { factManual = true; });
+      factInp.addEventListener('input', () => {
+        factManual = true;
+        factHint.style.display = '';
+      });
       paintDebt(debt.debtInp);
 
       card.appendChild(fieldRow('Количество жильцов', resInp));
@@ -262,6 +316,7 @@ const UI = (() => {
       card.appendChild(sumRow);
       card.appendChild(debt.debtRow);
       card.appendChild(fieldRow('Факт оплаты', factInp));
+      card.appendChild(factHint);
       card.appendChild(fieldRow('Дата оплаты', payInp));
       card.appendChild(paidCheck);
 
@@ -271,6 +326,7 @@ const UI = (() => {
         debt_advance: Logic.toNum(debt.debtInp.value),
         debt_advance_closed: isChecked(debt.debtCheck),
         fact_payment: Logic.toNum(factInp.value),
+        fact_manual: factManual,
         payment_date: payInp.value || null,
         flag_paid: isChecked(paidCheck)
       }));
@@ -369,6 +425,8 @@ const UI = (() => {
         Logic.carryDebt(Data.state.records, cfg.key, address, subservice, period.year, null),
         rec ? rec.debt_advance_closed : false);
       const factInp = numInput(rec ? rec.fact_payment : null);
+      const factHint = hintRow('✍️ сумма введена вручную — не пересчитывается');
+      if (!factManual) factHint.style.display = 'none';
       const payInp = dateInput(rec ? rec.payment_date : null);
       const paidCheck = checkRow('оплачено', rec ? rec.flag_paid : false);
 
@@ -387,7 +445,10 @@ const UI = (() => {
 
       [houseInp, landInp, carInp].forEach(i => i.addEventListener('input', recalc));
       debt.debtInp.addEventListener('input', () => { paintDebt(debt.debtInp); recalc(); });
-      factInp.addEventListener('input', () => { factManual = true; });
+      factInp.addEventListener('input', () => {
+        factManual = true;
+        factHint.style.display = '';
+      });
       paintDebt(debt.debtInp);
 
       card.appendChild(fieldRow('Дом', houseInp));
@@ -397,6 +458,7 @@ const UI = (() => {
       card.appendChild(prevRow);
       card.appendChild(debt.debtRow);
       card.appendChild(fieldRow('Факт оплаты', factInp));
+      card.appendChild(factHint);
       card.appendChild(fieldRow('Дата оплаты', payInp));
       card.appendChild(paidCheck);
 
@@ -407,6 +469,7 @@ const UI = (() => {
         debt_advance: Logic.toNum(debt.debtInp.value),
         debt_advance_closed: isChecked(debt.debtCheck),
         fact_payment: Logic.toNum(factInp.value),
+        fact_manual: factManual,
         payment_date: payInp.value || null,
         flag_paid: isChecked(paidCheck)
       }));
@@ -456,7 +519,7 @@ const UI = (() => {
 
       Data.upsertRecord(record);
       toast('Сохранено');
-      renderCard(host, cfg, address, subservice);
+      renderCard(host, cfg, address, subservice, record.id);
     });
     row.appendChild(save);
 
@@ -487,7 +550,7 @@ const UI = (() => {
   // Вкладки адресов/подпунктов + карточка.
   // preferred — какую вкладку выбрать (при открытии из истории);
   // без него сохраняем текущую выбранную вкладку.
-  function renderServiceBody(det, cfg, preferred) {
+  function renderServiceBody(det, cfg, preferred, editId) {
     const body = det.querySelector('.service-body');
     const prevSel = body.querySelector('.addr-chip.sel');
     const prevText = prevSel ? prevSel.textContent : null;
@@ -499,7 +562,7 @@ const UI = (() => {
     if (cfg.fixedAddress && !cfg.subservices) {
       body.appendChild(addrNote(cfg.fixedAddress));
       body.appendChild(cardHost);
-      renderCard(cardHost, cfg, cfg.fixedAddress, null);
+      renderCard(cardHost, cfg, cfg.fixedAddress, null, editId);
       return;
     }
 
@@ -508,7 +571,7 @@ const UI = (() => {
     // Услуга без вкладок — карточка сразу
     if (!options.length) {
       body.appendChild(cardHost);
-      renderCard(cardHost, cfg, cfg.fixedAddress || null, null);
+      renderCard(cardHost, cfg, cfg.fixedAddress || null, null, editId);
       return;
     }
 
@@ -540,6 +603,17 @@ const UI = (() => {
         if (ch.textContent === prevText) ch.click();
       });
     }
+
+    // Открытие конкретной записи месяца (из истории): вкладка записи
+    // уже выбрана — рисуем именно её
+    if (editId && editId !== 'new') {
+      const r = Data.state.records.find(x => x.id === editId);
+      if (r) {
+        renderCard(cardHost, cfg,
+          cfg.fixedAddress || (cfg.addresses ? (r.address || null) : null),
+          cfg.subservices ? (r.subservice || null) : null, r.id);
+      }
+    }
   }
 
   function renderDashboard() {
@@ -550,8 +624,9 @@ const UI = (() => {
       if (det._onToggle) det.removeEventListener('toggle', det._onToggle);
       det._onToggle = function () {
         if (!det.open) return;
-        renderServiceBody(det, cfg, det._preferred);
+        renderServiceBody(det, cfg, det._preferred, det._editId);
         det._preferred = null;
+        det._editId = null;
       };
       det.addEventListener('toggle', det._onToggle);
       if (det.open) renderServiceBody(det, cfg);
@@ -651,9 +726,10 @@ const UI = (() => {
     const pref = (target && options.includes(target)) ? target : null;
 
     if (det.open) {
-      renderServiceBody(det, cfg, pref);
+      renderServiceBody(det, cfg, pref, rec.id);
     } else {
       det._preferred = pref;   // обработчик toggle отрисует с учётом вкладки
+      det._editId = rec.id;
       det.open = true;
     }
 
@@ -887,7 +963,7 @@ const UI = (() => {
     pFrom: '', pTo: '',            // период «диапазон»
     aType: 'month', aMonth: null, aYear: null,   // сравнительный: период A
     bType: 'month', bMonth: null, bYear: null,   // сравнительный: период B
-    fAddress: '', fService: '', fUnpaid: false, fNoReadings: false
+    fAddress: '', fServices: [], fUnpaid: false, fNoReadings: false
   };
 
   function repInit() {
@@ -898,6 +974,13 @@ const UI = (() => {
       const prev = repShift({ y: App.period.year, m: App.period.month }, -1);
       rep.aMonth = prev.m; rep.aYear = prev.y;
       rep.bMonth = App.period.month; rep.bYear = App.period.year;
+    }
+    // Услуги «Сравнения месяцев»: помесячные включены, годовые — по желанию
+    if (!rep.dSvc) {
+      rep.dSvc = {};
+      SERVICES.forEach(c => {
+        rep.dSvc[c.key] = (c.kind !== 'annual' && c.kind !== 'taxes');
+      });
     }
   }
 
@@ -988,7 +1071,9 @@ const UI = (() => {
   // Записи после фильтров конструктора + периода
   function repRecords(mode) {
     let list = Data.state.records.slice();
-    if (rep.fService) list = list.filter(r => r.service === rep.fService);
+    if (rep.fServices && rep.fServices.length) {
+      list = list.filter(r => rep.fServices.includes(r.service));
+    }
     if (rep.fAddress) list = list.filter(r => (r.address || '') === rep.fAddress);
     const kinds = repKinds();
     if (rep.fUnpaid || rep.fNoReadings) {
@@ -1074,8 +1159,9 @@ const UI = (() => {
     const card = el('div', 'rep-block');
     card.appendChild(el('div', 'rep-title', '📊 Сравнение месяцев'));
     card.appendChild(el('div', 'rep-note',
-      'В ячейках — факт оплаты по каждому адресу. ' +
-      'Годовые услуги попадают в месяц фактической оплаты.'));
+      'В ячейках — факт оплаты по каждому адресу, несколько оплат за месяц ' +
+      'складываются. Годовые услуги попадают в месяц фактической оплаты. ' +
+      'Услуги для отчёта выбираются чипами под датами.'));
 
     const row = el('div', 'hist-panel-row');
     row.appendChild(histSelect('Месяц', monthOpts(), String(rep.dMonth),
@@ -1084,16 +1170,23 @@ const UI = (() => {
       v => { rep.dYear = Number(v); renderReports(); }));
     card.appendChild(row);
 
+    // Выбор услуг (несколько)
+    const rowS = el('div', 'hist-panel-row');
+    SERVICES.forEach(c => {
+      rowS.appendChild(histChip(c.icon + ' ' + c.key, !!rep.dSvc[c.key],
+        v => { rep.dSvc[c.key] = v; renderReports(); }));
+    });
+    card.appendChild(rowS);
+
     const cur = { y: rep.dYear, m: rep.dMonth };
     const prev = repShift(cur, -1);
-    const inPrev = Data.state.records.filter(r => recInMonth(r, prev.y, prev.m));
-    const inCur = Data.state.records.filter(r => recInMonth(r, cur.y, cur.m));
 
-    // Годовые услуги показываем, только если оплачены в один из двух месяцев
-    const annualShown = ['Телевидение', 'Налоги'].filter(svc =>
-      inPrev.concat(inCur).some(r => r.service === svc && isAnnualRec(r)));
-
-    const rows = ['Газ', 'Вода', 'Свет', 'Мусор', 'Интернет'].concat(annualShown);
+    // Строки отчёта — отмеченные чипами услуги
+    const rows = SERVICES.map(c => c.key).filter(k => rep.dSvc[k]);
+    if (!rows.length) {
+      card.appendChild(emptyBox('Услуги не выбраны — отметьте хотя бы одну.'));
+      return card;
+    }
 
     const totals = {
       prev: { 'Рабочая 23': null, 'Рабочая 23А': null },
@@ -1130,10 +1223,12 @@ const UI = (() => {
       const cfg = SERVICES.find(c => c.key === svc);
       const tr = el('tr');
       tr.appendChild(el('td', 'rep-name', (cfg ? cfg.icon + ' ' : '') + svc));
-      [['prev', inPrev], ['cur', inCur]].forEach(pair => {
+      [{ key: 'prev', p: prev }, { key: 'cur', p: cur }].forEach(pair => {
+        const monthList = Data.state.records.filter(r =>
+          recInMonth(r, pair.p.y, pair.p.m));
         REP_BUCKETS.forEach(b => {
-          const v = sumMetric(pair[1], svc, b, 'fact');
-          addTot(totals[pair[0]], b, v);
+          const v = sumMetric(monthList, svc, b, 'fact');
+          addTot(totals[pair.key], b, v);
           tr.appendChild(moneyCell(v));
         });
       });
@@ -1377,6 +1472,7 @@ const UI = (() => {
     recs.sort((a, b) =>
       (a.period_year - b.period_year) ||
       ((a.period_month || 12) - (b.period_month || 12)) ||
+      String(a.payment_date || '').localeCompare(String(b.payment_date || '')) ||
       a.service.localeCompare(b.service, 'ru'));
 
     const box = resultBox(
@@ -1386,12 +1482,12 @@ const UI = (() => {
       return box;
     }
 
-    const built = repTable(660);
+    const built = repTable(760);
     const thead = el('thead');
     const tr = el('tr');
-    ['Период', 'Услуга', 'Адрес', 'Факт', 'Начислено', 'Долг/аванс', 'Метки']
+    ['Период', 'Услуга', 'Адрес', 'Оплачено', 'Факт', 'Начислено', 'Долг/аванс', 'Метки']
       .forEach((h, i) => {
-        tr.appendChild(el('th', (i < 3 || i === 6) ? 'rep-left' : null, h));
+        tr.appendChild(el('th', (i < 3 || i === 7) ? 'rep-left' : null, h));
       });
     thead.appendChild(tr);
     built.t.appendChild(thead);
@@ -1409,6 +1505,7 @@ const UI = (() => {
       if (r.subservice) name += ' · ' + r.subservice;
       tr.appendChild(el('td', 'rep-left', name));
       tr.appendChild(el('td', 'rep-left', r.address || '—'));
+      tr.appendChild(el('td', null, fmtDate(r.payment_date)));
 
       const f = Logic.toNum(r.fact_payment);
       const a = recAccrued(r);
@@ -1433,6 +1530,7 @@ const UI = (() => {
 
     const trT = el('tr', 'rep-total');
     trT.appendChild(el('td', 'rep-left', 'Итого'));
+    trT.appendChild(el('td', null, ''));
     trT.appendChild(el('td', null, ''));
     trT.appendChild(el('td', null, ''));
     trT.appendChild(moneyCell(totFact));
@@ -1484,11 +1582,25 @@ const UI = (() => {
       { value: 'Рабочая 23', label: 'Рабочая 23' },
       { value: 'Рабочая 23А', label: 'Рабочая 23А' }
     ], rep.fAddress, v => { rep.fAddress = v; renderReports(); }));
-    rowF.appendChild(histSelect('Услуга',
-      [{ value: '', label: 'Все услуги' }].concat(
-        SERVICES.map(c => ({ value: c.key, label: c.icon + ' ' + c.key }))),
-      rep.fService, v => { rep.fService = v; renderReports(); }));
     card.appendChild(rowF);
+
+    // Фильтр услуг: можно отметить несколько; пусто — все услуги
+    const rowS = el('div', 'hist-panel-row');
+    SERVICES.forEach(c => {
+      rowS.appendChild(histChip(c.icon + ' ' + c.key,
+        rep.fServices.includes(c.key),
+        v => {
+          if (v) {
+            if (!rep.fServices.includes(c.key)) rep.fServices.push(c.key);
+          } else {
+            rep.fServices = rep.fServices.filter(k => k !== c.key);
+          }
+          renderReports();
+        }));
+    });
+    card.appendChild(rowS);
+    card.appendChild(el('div', 'fhint',
+      'Фильтр «услуги»: можно выбрать несколько; если ничего не отмечено — в отчёте все услуги.'));
 
     const rowC = el('div', 'hist-panel-row');
     rowC.appendChild(histChip('не оплачено', rep.fUnpaid,

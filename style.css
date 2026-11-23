@@ -755,3 +755,23 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dbx-status { font-weight: 600; font-size: 15px; margin-top: 12px; }
 .dbx-line { margin-top: 6px; }
 .dbx-uri { color: var(--accent); font-weight: 700; word-break: break-all; }
+
+/* ===== Записи месяца в карточке ===== */
+.rec-strip { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 2px; }
+.rec-chip {
+  font-family: inherit;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  padding: 7px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rec-chip.sel {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+}
+.rec-add { border-style: dashed; color: var(--accent-dark); }

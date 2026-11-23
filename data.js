@@ -113,6 +113,21 @@ const Data = (() => {
       (r.period_month || null) === (month || null)) || null;
   }
 
+  // Все записи одного периода: в месяце их может быть несколько —
+  // разными датами и суммами. От старых к свежим по дате оплаты.
+  function findRecords(service, address, subservice, year, month) {
+    return state.records
+      .filter(r =>
+        r.service === service &&
+        (r.address || null) === (address || null) &&
+        (r.subservice || null) === (subservice || null) &&
+        r.period_year === year &&
+        (r.period_month || null) === (month || null))
+      .sort((a, b) =>
+        String(a.payment_date || '9999').localeCompare(String(b.payment_date || '9999')) ||
+        String(a.technical_date || '').localeCompare(String(b.technical_date || '')));
+  }
+
   // Добавить или обновить запись
   function upsertRecord(record) {
     const i = state.records.findIndex(r => r.id === record.id);
@@ -200,23 +215,28 @@ const Data = (() => {
   }
 
   // Добавить записи из файла в архив своего года.
-  // Совпадение по уникальному ключу — остаётся более свежая запись.
+  // Совпадение — как в mergeRecords: по id, по единственной записи
+  // периода или по ключу+дате+сумме для записей из CSV.
   function addArchived(records) {
     let n = 0;
     (records || []).forEach(rec => {
       if (!rec || !rec.service) return;
+      const hadId = !!rec.id;
       const rec2 = Object.assign({}, rec);
       if (!rec2.id) rec2.id = uid();
       if (!rec2.technical_date) rec2.technical_date = new Date().toISOString();
       const y = yearOf(rec2);
       if (!state.archives[y]) state.archives[y] = [];
-      const twin = state.archives[y].find(r =>
-        r.service === rec2.service &&
-        (r.address || null) === (rec2.address || null) &&
-        (r.subservice || null) === (rec2.subservice || null) &&
-        r.period_year === rec2.period_year &&
-        (r.period_month || null) === (rec2.period_month || null));
-      if (!twin) { state.archives[y].push(rec2); n++; }
+      const list = state.archives[y];
+      let twin = list.find(r => r.id === rec2.id);
+      if (!twin && hadId) {
+        const twins = list.filter(r =>
+          sameKey(r, rec2.service, rec2.address, rec2.subservice,
+            rec2.period_year, rec2.period_month));
+        if (twins.length === 1) twin = twins[0];
+      }
+      if (!twin && !hadId) twin = list.find(r => csvTwin(r, rec2));
+      if (!twin) { list.push(rec2); n++; }
       else if (String(rec2.technical_date || '') > String(twin.technical_date || '')) {
         Object.assign(twin, rec2);
         n++;
@@ -246,16 +266,37 @@ const Data = (() => {
     return rec2;
   }
 
+  // «Та же запись» для файла из CSV (без id): совпадают ключ периода,
+  // дата и сумма оплаты. Второй платёж за тот же месяц (другая дата
+  // или сумма) близнецом не считается и добавится отдельной записью.
+  function csvTwin(r, rec) {
+    return sameKey(r, rec.service, rec.address, rec.subservice,
+        rec.period_year, rec.period_month) &&
+      (r.payment_date || null) === (rec.payment_date || null) &&
+      ((Number(r.fact_payment) || 0) === (Number(rec.fact_payment) || 0));
+  }
+
   // Умное слияние: записи из файла добавляются, а в совпавших
-  // (уникальный ключ) остаётся более свежая по technical_date.
+  // остаётся более свежая по technical_date.
+  // Совпадение: сначала по id; запись с id, которой нет в базе,
+  // считается той же, если за этот период она там одна; запись без id
+  // (из CSV) — по ключу, дате и сумме оплаты.
   function mergeRecords(incoming) {
     let added = 0, updated = 0;
     (incoming || []).forEach(rec => {
       if (!rec || !rec.service) return;
+      const hadId = !!rec.id;
       const rec2 = prepareImported(rec);
-      const i = state.records.findIndex(r =>
-        sameKey(r, rec2.service, rec2.address, rec2.subservice,
-          rec2.period_year, rec2.period_month));
+      let i = state.records.findIndex(r => r.id === rec2.id);
+      if (i < 0 && hadId) {
+        const twins = state.records.filter(r =>
+          sameKey(r, rec2.service, rec2.address, rec2.subservice,
+            rec2.period_year, rec2.period_month));
+        if (twins.length === 1) i = state.records.indexOf(twins[0]);
+      }
+      if (i < 0 && !hadId) {
+        i = state.records.findIndex(r => csvTwin(r, rec2));
+      }
       if (i < 0) { state.records.push(rec2); added++; }
       else if (String(rec2.technical_date || '') >
                String(state.records[i].technical_date || '')) {
@@ -306,7 +347,7 @@ const Data = (() => {
 
   return {
     init, persist, uid, isHealthy,
-    findRecord, upsertRecord, removeRecord,
+    findRecord, findRecords, upsertRecord, removeRecord,
     autoArchive, archiveRecords, restoreRecords, addArchived,
     mergeRecords, replaceAll, resetAll,
     get state() { return state; }
